@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: testpod
+  namespace: kube-system
+  labels:
+    app: myapp
+    version: v1
+  annotations:
+    modify_process_name: "hello"
+    delay_second: "86400"
+spec:
+  containers:
+    - name: myhello
+      image: 1286804667/hello:v3
