@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubernetes-faketime-injector
+  namespace: kube-system
+  labels:
+    app: kubernetes-faketime-injector
+spec:
+  replicas: 1 # The default is primary and standby mode (currently cold standby)
+  selector:
+    matchLabels:
+      app: kubernetes-faketime-injector
+  template:
+    metadata:
+      labels:
+        app: kubernetes-faketime-injector
+    spec:
+      containers:
+        - image: 1286804667/kubernetes-faketime-injector:v20
+          imagePullPolicy: Always
+          name: kubernetes-faketime-injector
+          resources:
+            limits:
+              cpu: 100m
+              memory: 100Mi
+            requests:
+              cpu: 100m
+              memory: 100Mi
+          env:
+          - name: FAKETIME_PLUGIN_IMAGE
+            value: "1286804667/watchmaker:v11"
+          volumeMounts:
+          - name: webhook-certs
+            mountPath: /run/secrets/tls
+      # todo change service account to kubernetes-webhook-injector as default
+      serviceAccountName: admin
+      volumes:
+        - name: webhook-certs
+          secret:
+            secretName: kubernetes-faketime-injector
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: kubernetes-faketime-injector
+  namespace: kube-system
+spec:
+  ports:
+    - port: 443
+      targetPort: 443
+      name: webhook
+  selector:
+    app: kubernetes-faketime-injector
