@@ -9,9 +9,9 @@ import (
 
 const (
 	PluginName        = "FaketimePlugin"
-	ContainerName     = "fake-time"
-	ModifyProcessName = "modify_process_name"
-	DelaySecond       = "delay_second"
+	ContainerName     = "fake-time-sidecar"
+	ModifyProcessName = "game.cloudnative.io/modify-process-name"
+	DelaySecond       = "game.cloudnative.io/delay-second"
 	IMAGE_ENV         = "FAKETIME_PLUGIN_IMAGE"
 )
 
@@ -48,8 +48,8 @@ func (s *FaketimePlugin) Patch(pod *apiv1.Pod, operation addmissionV1.Operation)
 			ImagePullPolicy: apiv1.PullAlways,
 		}
 		con.Env = []apiv1.EnvVar{
-			{Name: ModifyProcessName, Value: pod.Annotations[ModifyProcessName]},
-			{Name: DelaySecond, Value: pod.Annotations[DelaySecond]},
+			{Name: "modify_process_name", Value: pod.Annotations[ModifyProcessName]},
+			{Name: "delay_second", Value: pod.Annotations[DelaySecond]},
 		}
 		pod.Spec.Containers = append(pod.Spec.Containers, con)
 		addConPatch := utils.PatchOperation{
