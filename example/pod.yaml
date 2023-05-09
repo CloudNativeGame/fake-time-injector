@@ -7,9 +7,9 @@ metadata:
     app: myapp
     version: v1
   annotations:
-    modify_process_name: "hello"
-    delay_second: "86400"
+    game.cloudnative.io/modify-process-name: "hello"
+    game.cloudnative.io/delay-second: "86400"
 spec:
   containers:
     - name: myhello
-      image: 1286804667/hello:v3
+      image: registry.cn-hangzhou.aliyuncs.com/acs/hello:v1

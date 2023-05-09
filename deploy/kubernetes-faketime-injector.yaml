@@ -16,7 +16,7 @@ spec:
         app: kubernetes-faketime-injector
     spec:
       containers:
-        - image: 1286804667/kubernetes-faketime-injector:v20
+        - image: registry.cn-hangzhou.aliyuncs.com/acs/faketime:v2
           imagePullPolicy: Always
           name: kubernetes-faketime-injector
           resources:
@@ -27,11 +27,11 @@ spec:
               cpu: 100m
               memory: 100Mi
           env:
-          - name: FAKETIME_PLUGIN_IMAGE
-            value: "1286804667/watchmaker:v11"
+            - name: FAKETIME_PLUGIN_IMAGE
+              value: "registry.cn-hangzhou.aliyuncs.com/acs/watchmaker:v11"
           volumeMounts:
-          - name: webhook-certs
-            mountPath: /run/secrets/tls
+            - name: webhook-certs
+              mountPath: /run/secrets/tls
       # todo change service account to kubernetes-webhook-injector as default
       serviceAccountName: admin
       volumes:
