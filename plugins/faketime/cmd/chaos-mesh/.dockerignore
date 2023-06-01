@@ -1,9 +1,0 @@
-**
-
-!start.sh
-!api
-!cmd
-!pkg
-!go.mod
-!go.sum
-!Makefile

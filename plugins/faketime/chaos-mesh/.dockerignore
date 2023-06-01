@@ -1,0 +1,9 @@
+**
+
+!start.sh
+!watchmaker
+!time
+!go.mod
+!go.sum
+!Makefile
+!pkg

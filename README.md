@@ -132,7 +132,7 @@ spec:
         app: kubernetes-faketime-injector
     spec:
       containers:
-        - image: registry.cn-hangzhou.aliyuncs.com/acs/faketime:v2
+        - image: registry.cn-hangzhou.aliyuncs.com/acs/fake-time-injector:v1     // docker build -t fake-time-injector:v1 . -f fake-time-injector/Dockerfile
           imagePullPolicy: Always
           name: kubernetes-faketime-injector
           resources:
@@ -144,7 +144,7 @@ spec:
               memory: 100Mi
           env:
             - name: FAKETIME_PLUGIN_IMAGE
-              value: "registry.cn-hangzhou.aliyuncs.com/acs/watchmaker:v11"
+              value: "registry.cn-hangzhou.aliyuncs.com/acs/fake-time-sidecar:v1"   // docker build -t fake-time-sidecar:v1 . -f fake-time-injector/plugins/faketime/chaos-mesh/Dockerfile
           volumeMounts:
             - name: webhook-certs
               mountPath: /run/secrets/tls
@@ -225,7 +225,7 @@ spec:
           value: hello
         - name: delay_second
           value: '86400'
-      image: 'registry.cn-hangzhou.aliyuncs.com/acs/watchmaker:v11'
+      image: 'registry.cn-hangzhou.aliyuncs.com/acs/fake-time-sidecar:v1'
       imagePullPolicy: Always
       name: fake-time-sidecar
   shareProcessNamespace: true
