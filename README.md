@@ -96,20 +96,20 @@ cat server-key.pem | base64
 
 * Use the key from the previous step to generate the secret
 
-```yaml
+```shell
 cat > secret.yaml <<EOF
- apiVersion: v1 
- data:   
-   ca-cert.pem: xxxxxxxxx   
-   server-cert.pem: xxxxxx   
-   server-key.pem: xxxxxxx 
-kind: Secret 
-metadata:   
-  name: kubernetes-faketime-injector   
-  namespace: kube-system 
-EOF
- 
-kubectl apply -f secret.yaml
+apiVersion: v1
+data:
+  ca-cert.pem: xxxxxxxxx
+  server-cert.pem: xxxxxx
+  server-key.pem: xxxxxxx
+kind: Secret
+metadata:
+  name: kubernetes-faketime-injector
+  namespace: kube-system
+  EOF
+
+  kubectl apply -f secret.yaml
 ```
 
 #### step2: deploy the webhook and service
@@ -132,7 +132,7 @@ spec:
         app: kubernetes-faketime-injector
     spec:
       containers:
-        - image: registry.cn-hangzhou.aliyuncs.com/acs/faketime:v2
+        - image: registry.cn-hangzhou.aliyuncs.com/acs/fake-time-injector:v1     // docker build -t fake-time-injector:v1 . -f fake-time-injector/Dockerfile
           imagePullPolicy: Always
           name: kubernetes-faketime-injector
           resources:
@@ -143,8 +143,10 @@ spec:
               cpu: 100m
               memory: 100Mi
           env:
+            - name: LIBFAKETIME_PLUGIN_IMAGE
+              value: "registry.cn-hangzhou.aliyuncs.com/acs/libfaketime:v1"
             - name: FAKETIME_PLUGIN_IMAGE
-              value: "registry.cn-hangzhou.aliyuncs.com/acs/watchmaker:v11"
+              value: "registry.cn-hangzhou.aliyuncs.com/acs/fake-time-sidecar:v1"   // docker build -t fake-time-sidecar:v1 . -f fake-time-injector/plugins/faketime/build/Dockerfile
           volumeMounts:
             - name: webhook-certs
               mountPath: /run/secrets/tls
@@ -172,10 +174,10 @@ Deploy the yaml file.
 ```
 kubectl apply -f deploy/kubernetes-faketime-injector.yaml 
 ```
-#### step3: deploy the pod
+#### step3: deploy the pod 
 You need to add two annotations to the pod.
 * One of the annotations is 'game.cloudnative.io/modify-process-name', which sets the process that needs to modify the time
-* Another annotation is 'game.cloudnative.io/delay-second', which sets how long the previous process needs to drift
+* Another annotation is 'game.cloudnative.io/fake-time', which sets delay time
 
 ```yaml
 apiVersion: v1
@@ -188,21 +190,56 @@ metadata:
     version: v1
   annotations:
     game.cloudnative.io/modify-process-name: "hello"
-    game.cloudnative.io/delay-second: "86400"
+    game.cloudnative.io/fake-time: "2024-01-01 00:00:00"
 spec:
   containers:
     - name: myhello
       image: registry.cn-hangzhou.aliyuncs.com/acs/hello:v1
+      volumeMounts:
+        - mountPath: /usr/local/lib/faketime
+          name: faketime
+  volumes:
+    - name: faketime
+      emptyDir: {}
 ```
-
-#### step4: check the result  
-Use the following command to enter the 'myhello' container，The hello process will record the time to the demo.txt file every 5 seconds
+Use the following command to enter the 'myhello' container,The hello process will record the time to the demo.txt file every 5 seconds
 
 `
 kubectl exec -it testpod -c myhello /bin/bash -n kube-system
 `
-![example2](example/example1.png)
-As can be seen from the results, the time is delayed by 86400 seconds
+![example1](example/watchmakerexample.png)
+
+We also provide another usage to let the time stay at the set time when the container is generated
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: testpod
+  namespace: kube-system
+  labels:
+    app: myapp
+    version: v1
+  annotations:
+    game.cloudnative.io/modify-process-name: "hello"
+    game.cloudnative.io/fake-time: "2024-01-01 00:00:00"
+spec:
+  containers:
+    - env:
+        - name: LD_PRELOAD      // add the path to the libfaketime.so.1
+          value: /usr/local/lib/faketime/libfaketime.so.1
+        - name: FAKETIME       // add the time to be modified
+          value: "@2024-01-01 00:00:00"
+      name: myhello
+      image: registry.cn-hangzhou.aliyuncs.com/acs/hello:v1
+      volumeMounts:
+        - mountPath: /usr/local/lib/faketime
+          name: faketime
+  volumes:
+    - name: faketime
+      emptyDir: {}
+```
+You can also execute commands in virtual time
+![example2](example/libfaketimeexample.png)
 
 ## Alternative Solution
 
@@ -225,7 +262,7 @@ spec:
           value: hello
         - name: delay_second
           value: '86400'
-      image: 'registry.cn-hangzhou.aliyuncs.com/acs/watchmaker:v11'
+      image: 'registry.cn-hangzhou.aliyuncs.com/acs/fake-time-sidecar:v1'
       imagePullPolicy: Always
       name: fake-time-sidecar
   shareProcessNamespace: true
