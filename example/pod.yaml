@@ -7,8 +7,8 @@ metadata:
     app: myapp
     version: v1
   annotations:
-    game.cloudnative.io/modify-process-name: "hello"
-    game.cloudnative.io/delay-second: "86400"
+    cloudnativegame.io/process-name: "hello"
+    cloudnativegame.io/fake-time: "2024-01-01 00:00:00"
 spec:
   containers:
     - name: myhello
