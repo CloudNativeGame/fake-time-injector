@@ -13,8 +13,8 @@ const (
 	PluginName            = "FaketimePlugin"
 	ContainerName         = "fake-time-sidecar"
 	InitContainerName     = "libfaketime"
-	ModifyProcessName     = "game.cloudnative.io/modify-process-name"
-	FakeTime              = "game.cloudnative.io/fake-time"
+	ModifyProcessName     = "cloudnativegame.io/process-name"
+	FakeTime              = "cloudnativegame.io/fake-time"
 	IMAGE_ENV             = "FAKETIME_PLUGIN_IMAGE"
 	LIBFAKETIME_IMAGE_ENV = "LIBFAKETIME_PLUGIN_IMAGE"
 )

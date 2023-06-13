@@ -1,32 +1,34 @@
 # fake-time-injector
 
-中文 | [English](./docs/en/README.md)
+[中文](../../README.md) | English
 
-## 概述
+## overview
 
-fake-time-injector 是一个轻量级且灵活的工具。使用该工具，您可以轻松地将虚假时间值注入到容器中，以便在不同的时间场景下模拟和测试应用程序的行为。
+fake-time-injector is a lightweight and flexible tool. With this tool, you can easily inject fake time values into your containers, allowing you to simulate different time scenarios and test the behavior of your applications under various time conditions
 
-## 插件支持编程语言
+## Plugin Supported Programming Languages
 
 * Go
 * C
-* Erlang
 * C++
+* Erlang
 * Ruby
 * PHP
 * JavaScript
 * Python
 * Java
 
-## 示例
+## Example
 
-以下是使用 Fake-Time-Injector 修改容器进程时间的示例。该工具使用 Kubernetes 中的 Webhook 机制实现请求解析更改。一旦在容器中部署了此组件，您就可以按照某些规则编写 YAML 文件来修改 pod 中特定容器的时间。基本原理是通过配置 WATCHMAKER 插件和 LIBFAKETIME 插件使此组件能够修改容器时间。
+Here's an example of how you can modify a container's process time using Fake-Time-Injector. This tool uses the webhook mechanism in Kubernetes to implement request parsing changes. Once you deploy this component in your container, you can modify the specific container time in your pod by writing a YAML file according to certain rules. The basic principle is to enable this component to modify the container time by configuring the FAKETIME plugin and LIBFAKETIME plugin.
 
-### 步骤 1：生成CA证书
+### step1: generate CA certificate
 
-要在群集中配置 webhook admission，请使用以下 YAML 生成包含 CA 证书的 secret。注意，无需配置 webhookconfig.yaml 文件，因为 Fake-Time-Injector 将自动配置 MutatingWebhookConfiguration。
+Configure webhook admission in the cluster, use the following yaml to generate a secret containing the CA certificate, note that there is no need to configure the webhookconfig.yaml file, fake-time-injector will automatically configure MutatingWebhookConfiguration
 
-* 首先，您需要安装 cfssl 以创建证书：
+To configure webhook admission in your cluster, use the following YAML to generate a secret containing the CA certificate. Note that there's no need to configure the webhookconfig.yaml file as Fake-Time-Injector will automatically configure MutatingWebhookConfiguration.
+
+* First, you'll need to install cfssl, which you'll use to create the certificate:
 
 ```shell
 wget -q https://pkg.cfssl.org/R1.2/cfssl_linux-amd64 https://pkg.cfssl.org/R1.2/cfssljson_linux-amd64
@@ -35,7 +37,7 @@ sudo mv cfssl_linux-amd64 /usr/local/bin/cfssl
 sudo mv cfssljson_linux-amd64 /usr/local/bin/cfssljson
 ```
 
-* 使用以下 JSON 文件创建 CA 证书：
+* Create a CA certificate using the following JSON file:
 
 ```shell
 cat > ca-config.json <<EOF
@@ -81,7 +83,7 @@ EOF
 cfssl gencert -initca ca-csr.json | cfssljson -bare ca 
 ```
 
-* 创建服务器证书
+* Creating a Server Cert
 
 ```shell
 cat > server-csr.json <<EOF 
@@ -106,7 +108,7 @@ EOF
 cfssl gencert -ca=ca.pem -ca-key=ca-key.pem -config=ca-config.json -hostname=kubernetes-faketime-injector.kube-system.svc -profile=server server-csr.json | cfssljson -bare server
 ```
 
-* 对生成的证书进行 Base64 加密：
+* Base64-Encrypt the Generated Certificate:
 
 ```shell
 cat ca.pem | base64
@@ -114,7 +116,7 @@ cat server.pem | base64
 cat server-key.pem | base64
 ```
 
-* 使用上一步骤中的密钥生成 secret：
+* Use the Key from the Previous Step to Generate the Secret:
 
 ```shell
 cat > secret.yaml <<EOF
@@ -132,9 +134,10 @@ metadata:
   kubectl apply -f secret.yaml
 ```
 
-### 步骤 2: 部署fake-time-injector
+### step2: deploy fake-time-injector
 
-使用以下YAML文件，部署fake-time-injector：
+Deploy fake-time-injector using the following YAML file:
+
 
 ```yaml
 apiVersion: v1
@@ -190,7 +193,7 @@ spec:
         app: kubernetes-faketime-injector
     spec:
       containers:
-        - image: registry.cn-hangzhou.aliyuncs.com/acs/fake-time-injector:v1     //  使用 fake-time-injector/Dockerfile 创建镜像
+        - image: registry.cn-hangzhou.aliyuncs.com/acs/fake-time-injector:v1     // docker build -t fake-time-injector:v1 . -f fake-time-injector/Dockerfile
           imagePullPolicy: Always
           name: kubernetes-faketime-injector
           resources:
@@ -204,11 +207,11 @@ spec:
             - name: LIBFAKETIME_PLUGIN_IMAGE
               value: "registry.cn-hangzhou.aliyuncs.com/acs/libfaketime:v1"
             - name: FAKETIME_PLUGIN_IMAGE
-              value: "registry.cn-hangzhou.aliyuncs.com/acs/fake-time-sidecar:v1"   // 使用 fake-time-injector/plugins/faketime/build/Dockerfile 创建镜像
+              value: "registry.cn-hangzhou.aliyuncs.com/acs/fake-time-sidecar:v1"   // docker build -t fake-time-sidecar:v1 . -f fake-time-injector/plugins/faketime/build/Dockerfile
           volumeMounts:
             - name: webhook-certs
               mountPath: /run/secrets/tls
-      serviceAccountName:  fake-time-injector-sa
+      serviceAccountName: fake-time-injector-sa
       volumes:
         - name: webhook-certs
           secret:
@@ -228,17 +231,17 @@ spec:
     app: kubernetes-faketime-injector
 ```
 
-将这个YAML文件保存到一个名为deploy.yaml的文件中。然后使用下面的命令来部署它：
+Save this YAML file to a local file named deploy.yaml. Then, use the following command to deploy it:
 
 ```
 kubectl apply -f deploy/kubernetes-faketime-injector.yaml 
 ```
 
-### step3: 修改时间
+### step3: modify time
 
-要使用fake-time-injector，你需要向pod添加两个注解：
-* cloudnativegame.io/process-name: 设置需要修改时间的进程
-* cloudnativegame.io/fake-time: 设置虚假的时间
+To use the injector, you need to add two annotations to the pod:
+* cloudnativegame.io/process-name: sets the process that needs to modify the time
+* cloudnativegame.io/fake-time: sets the fake time
 
 Here's an example YAML file that illustrates how to add these annotations to a Pod:
 
@@ -265,20 +268,20 @@ spec:
     - name: faketime
       emptyDir: {}
 ```
-将这个YAML文件保存到一个名为testpod.yaml的本地文件。然后，使用下面的命令来部署它：
+Save this YAML file to a local file named testpod.yaml. Then, use the following command to deploy it:
 
 ```yaml
 kubectl apply -f testpod.yaml
 ```
 
-要进入myhello容器并测试时间是否被修改，使用以下命令：
+To enter the myhello container and test that the time is modified, use the following command:
 
 ```
 kubectl exec -it testpod -c myhello /bin/bash -n kube-system
 ```
 ![example1](example/watchmakerexample.png)
 
-我们还提供了另一种方法修改容器的时间：
+We also provide another method to modify the container's time：
 
 ```yaml
 apiVersion: v1
@@ -295,9 +298,9 @@ metadata:
 spec:
   containers:
     - env:
-        - name: LD_PRELOAD      // 添加动态链接加载器的路径
+        - name: LD_PRELOAD      // add the path to the libfaketime.so.1
           value: /usr/local/lib/faketime/libfaketime.so.1
-        - name: FAKETIME       // 添加修改时间的环境变量
+        - name: FAKETIME       // add the time to be modified
           value: "@2024-01-01 00:00:00"
       name: myhello
       image: registry.cn-hangzhou.aliyuncs.com/acs/hello:v1
@@ -309,13 +312,13 @@ spec:
       emptyDir: {}
 ```
 
-你也可以让命令在虚拟时间内执行
+You can also have the command executed in virtual time
 
 ![example2](example/libfaketimeexample.png)
 
-## 替代方案
+## Alternative Solution
 
-我们还推荐另一种修改时间的方法，即直接在Pod上添加一个sidecar容器。下面是你的操作方法：
+We also recommend another approach for modifying time, which involves adding a sidecar container directly to the Pod. here's how you can do it:
 
 ```yaml
 apiVersion: v1
@@ -340,6 +343,6 @@ spec:
   shareProcessNamespace: true
 ```
 
-在这种方法中，你需要为sidecar容器设置两个环境变量：modify_process_name 和 delay_second。这将允许你指定哪个进程需要修改时间，以及相应的所需延迟时间。
+In this approach, you'll need to set two environment variables for the sidecar container: modify_process_name and delay_second. This will allow you to specify which process needs to modify the time, and the desired delay time accordingly.
 
-另外请注意，我们在`spec`中加入了 shareProcessNamespace，以确保两个容器共享相同的进程命名空间。
+Also, note that we've added shareProcessNamespace to the spec to ensure that both containers share the same process namespace.
