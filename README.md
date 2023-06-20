@@ -262,12 +262,7 @@ metadata:
     cloudnativegame.io/fake-time: "2024-01-01 00:00:00"
 spec:
   containers:
-    - env:
-        - name: LD_PRELOAD      // 添加动态链接加载器的路径
-          value: /usr/local/lib/faketime/libfaketime.so.1
-        - name: FAKETIME       // 添加修改时间的环境变量
-          value: "@2024-01-01 00:00:00"
-      name: myhello
+    - name: myhello
       image: registry.cn-hangzhou.aliyuncs.com/acs/hello:v1
 ```
 将这个YAML文件保存到一个名为testpod.yaml的本地文件。然后，使用下面的命令来部署它：

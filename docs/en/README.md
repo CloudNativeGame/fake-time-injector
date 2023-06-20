@@ -265,12 +265,7 @@ metadata:
     cloudnativegame.io/fake-time: "2024-01-01 00:00:00"
 spec:
   containers:
-    - env:
-        - name: LD_PRELOAD      // add the path to the libfaketime.so.1
-          value: /usr/local/lib/faketime/libfaketime.so.1
-        - name: FAKETIME       // add the time to be modified
-          value: "@2024-01-01 00:00:00"
-      name: myhello
+    - name: myhello
       image: registry.cn-hangzhou.aliyuncs.com/acs/hello:v1
 ```
 Save this YAML file to a local file named testpod.yaml. Then, use the following command to deploy it:
