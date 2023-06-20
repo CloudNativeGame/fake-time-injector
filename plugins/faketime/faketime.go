@@ -18,6 +18,8 @@ const (
 	FakeTime              = "cloudnativegame.io/fake-time"
 	IMAGE_ENV             = "FAKETIME_PLUGIN_IMAGE"
 	LIBFAKETIME_IMAGE_ENV = "LIBFAKETIME_PLUGIN_IMAGE"
+	LibFakeTimePath       = "/usr/local/lib/faketime/libfaketime.so.1"
+	LibFakeTimeMountPath  = "/usr/local/lib/faketime"
 )
 
 type FaketimePlugin struct {
@@ -92,7 +94,7 @@ func (s *FaketimePlugin) Patch(pod *apiv1.Pod, operation addmissionV1.Operation)
 			VolumeMounts: []apiv1.VolumeMount{
 				{
 					Name:      "faketime",
-					MountPath: "/usr/local/lib/faketime",
+					MountPath: LibFakeTimeMountPath,
 				},
 			},
 		}
@@ -121,7 +123,7 @@ func (s *FaketimePlugin) Patch(pod *apiv1.Pod, operation addmissionV1.Operation)
 		var volumeMountPath string
 		vm := apiv1.VolumeMount{
 			Name:      "faketime",
-			MountPath: "/usr/local/lib/faketime",
+			MountPath: LibFakeTimeMountPath,
 		}
 		for num, container := range pod.Spec.Containers {
 			if len(container.VolumeMounts) == 0 {
@@ -142,6 +144,34 @@ func (s *FaketimePlugin) Patch(pod *apiv1.Pod, operation addmissionV1.Operation)
 					Value: valueVolumeMount,
 				}
 				opPatches = append(opPatches, addConVolumeMountPatch)
+			}
+		}
+
+		//add container env
+		var patchContainerEnv bool
+		var valueContainerEnv interface{}
+		var ContainerEnvPath = "/spec/containers/%d/volumeMounts"
+		Env := []apiv1.EnvVar{
+			{Name: "LD_PRELOAD", Value: LibFakeTimePath},
+			{Name: "FAKETIME", Value: "@2024-01-01 00:00:00"},
+		}
+		for num, c := range pod.Spec.Containers {
+			if len(c.Env) == 0 {
+				ContainerEnvPath = fmt.Sprintf("/spec/containers/%d/env", num)
+				valueContainerEnv = append([]apiv1.EnvVar{}, Env...)
+				patchContainerEnv = true
+			} else {
+				ContainerEnvPath = fmt.Sprintf("/spec/containers/%d/env/-", num)
+				c.Env = append(c.Env, Env...)
+				patchContainerEnv = true
+			}
+			if patchContainerEnv {
+				addContainerEnvPatch := utils.PatchOperation{
+					Op:    "add",
+					Path:  ContainerEnvPath,
+					Value: valueContainerEnv,
+				}
+				opPatches = append(opPatches, addContainerEnvPatch)
 			}
 		}
 
