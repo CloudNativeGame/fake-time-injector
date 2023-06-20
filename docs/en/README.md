@@ -31,35 +31,39 @@ To configure webhook admission in your cluster, use the following YAML to genera
 * First, you'll need to install cfssl, which you'll use to create the certificate:
 
 ```shell
+linux:
 wget -q https://pkg.cfssl.org/R1.2/cfssl_linux-amd64 https://pkg.cfssl.org/R1.2/cfssljson_linux-amd64
 chmod +x cfssl_linux-amd64 cfssljson_linux-amd64 
 sudo mv cfssl_linux-amd64 /usr/local/bin/cfssl
 sudo mv cfssljson_linux-amd64 /usr/local/bin/cfssljson
+
+mac:
+brew install cfssl
 ```
 
 * Create a CA certificate using the following JSON file:
 
 ```shell
 cat > ca-config.json <<EOF
-> {
->     "signing": {
->         "default": {
->             "expiry": "8760h"
->         },
->         "profiles": {
->             "server": {
->                 "usages": [
->                     "signing",
->                     "key encipherment",
->                     "server auth",
->                     "client auth"
->                 ],
->                 "expiry": "8760h"
->             }
->         }
->     }
-> }
-> EOF
+{
+    "signing": {
+        "default": {
+            "expiry": "26280h"         //  this specifies the expiration time for the certificate
+        },
+        "profiles": {
+            "server": {
+                "usages": [
+                    "signing",
+                    "key encipherment",
+                    "server auth",
+                    "client auth"
+                ],               //   this specifies the key usages for this particular profile
+                "expiry": "26280h"
+            }
+        }
+    }
+}
+EOF
 
 cat > ca-csr.json <<EOF 
 {
@@ -67,7 +71,7 @@ cat > ca-csr.json <<EOF
     "key": {
         "algo": "rsa",
         "size": 2048
-    },
+    },             //  the key-related parameters, including the algorithm and size
     "names": [
         {
             "C": "US",
@@ -107,6 +111,8 @@ EOF
 
 cfssl gencert -ca=ca.pem -ca-key=ca-key.pem -config=ca-config.json -hostname=kubernetes-faketime-injector.kube-system.svc -profile=server server-csr.json | cfssljson -bare server
 ```
+
+-hostname: the naming scheme is `{serviceName}. {serviceNamespace}.svc`, in this example webhook's serviceName is kubernetes-faketime-injector and namespace is kube-system.
 
 * Base64-Encrypt the Generated Certificate:
 
@@ -259,14 +265,13 @@ metadata:
     cloudnativegame.io/fake-time: "2024-01-01 00:00:00"
 spec:
   containers:
-    - name: myhello
+    - env:
+        - name: LD_PRELOAD      // add the path to the libfaketime.so.1
+          value: /usr/local/lib/faketime/libfaketime.so.1
+        - name: FAKETIME       // add the time to be modified
+          value: "@2024-01-01 00:00:00"
+      name: myhello
       image: registry.cn-hangzhou.aliyuncs.com/acs/hello:v1
-      volumeMounts:
-        - mountPath: /usr/local/lib/faketime
-          name: faketime
-  volumes:
-    - name: faketime
-      emptyDir: {}
 ```
 Save this YAML file to a local file named testpod.yaml. Then, use the following command to deploy it:
 
@@ -281,38 +286,7 @@ kubectl exec -it testpod -c myhello /bin/bash -n kube-system
 ```
 ![example1](example/watchmakerexample.png)
 
-We also provide another method to modify the container's time：
-
-```yaml
-apiVersion: v1
-kind: Pod
-metadata:
-  name: testpod
-  namespace: kube-system
-  labels:
-    app: myapp
-    version: v1
-  annotations:
-    cloudnativegame.io/process-name: "hello"
-    cloudnativegame.io/fake-time: "2024-01-01 00:00:00"
-spec:
-  containers:
-    - env:
-        - name: LD_PRELOAD      // add the path to the libfaketime.so.1
-          value: /usr/local/lib/faketime/libfaketime.so.1
-        - name: FAKETIME       // add the time to be modified
-          value: "@2024-01-01 00:00:00"
-      name: myhello
-      image: registry.cn-hangzhou.aliyuncs.com/acs/hello:v1
-      volumeMounts:
-        - mountPath: /usr/local/lib/faketime
-          name: faketime
-  volumes:
-    - name: faketime
-      emptyDir: {}
-```
-
-You can also have the command executed in virtual time
+We also provide another method to modify the container's time, you can also have the command executed in virtual time
 
 ![example2](example/libfaketimeexample.png)
 

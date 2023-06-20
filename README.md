@@ -20,7 +20,7 @@ fake-time-injector 是一个轻量级且灵活的工具。使用该工具，您�
 
 ## 示例
 
-以下是使用 Fake-Time-Injector 修改容器进程时间的示例。该工具使用 Kubernetes 中的 Webhook 机制实现请求解析更改。一旦在容器中部署了此组件，您就可以按照某些规则编写 YAML 文件来修改 pod 中特定容器的时间。基本原理是通过配置 WATCHMAKER 插件和 LIBFAKETIME 插件使此组件能够修改容器时间。
+以下是使用 fake-time-injector 修改容器进程时间的示例。该工具使用 Kubernetes 中的 Webhook 机制实现请求解析更改。一旦在容器中部署了此组件，您就可以按照某些规则编写 YAML 文件来修改 pod 中特定容器的时间。基本原理是通过配置 WATCHMAKER 插件和 LIBFAKETIME 插件使此组件能够修改容器时间。
 
 ### 步骤 1：生成CA证书
 
@@ -29,35 +29,39 @@ fake-time-injector 是一个轻量级且灵活的工具。使用该工具，您�
 * 首先，您需要安装 cfssl 以创建证书：
 
 ```shell
+linux:
 wget -q https://pkg.cfssl.org/R1.2/cfssl_linux-amd64 https://pkg.cfssl.org/R1.2/cfssljson_linux-amd64
 chmod +x cfssl_linux-amd64 cfssljson_linux-amd64 
 sudo mv cfssl_linux-amd64 /usr/local/bin/cfssl
 sudo mv cfssljson_linux-amd64 /usr/local/bin/cfssljson
+
+mac:
+brew install cfssl
 ```
 
 * 使用以下 JSON 文件创建 CA 证书：
 
 ```shell
 cat > ca-config.json <<EOF
-> {
->     "signing": {
->         "default": {
->             "expiry": "8760h"
->         },
->         "profiles": {
->             "server": {
->                 "usages": [
->                     "signing",
->                     "key encipherment",
->                     "server auth",
->                     "client auth"
->                 ],
->                 "expiry": "8760h"
->             }
->         }
->     }
-> }
-> EOF
+{
+    "signing": {
+        "default": {
+            "expiry": "26280h"
+        },         //证书的有效期
+        "profiles": {
+            "server": {
+                "usages": [
+                    "signing",
+                    "key encipherment",
+                    "server auth",
+                    "client auth"
+                ],              //证书使用的场景
+                "expiry": "26280h"
+            }
+        }
+    }
+}
+EOF
 
 cat > ca-csr.json <<EOF 
 {
@@ -90,7 +94,7 @@ cat > server-csr.json <<EOF
     "key": {
         "algo": "rsa",
         "size": 2048
-    },
+    },        //  生成证书所需的算法和密钥长度
     "names": [
         {
             "C": "US",
@@ -105,6 +109,8 @@ EOF
 
 cfssl gencert -ca=ca.pem -ca-key=ca-key.pem -config=ca-config.json -hostname=kubernetes-faketime-injector.kube-system.svc -profile=server server-csr.json | cfssljson -bare server
 ```
+
+-hostname：命名方式为`{serviceName}.{serviceNamespace}.svc`，本示例中webhook的serviceName是kubernetes-faketime-injector，namespace是kube-system。
 
 * 对生成的证书进行 Base64 加密：
 
@@ -240,45 +246,7 @@ kubectl apply -f deploy/kubernetes-faketime-injector.yaml
 * cloudnativegame.io/process-name: 设置需要修改时间的进程
 * cloudnativegame.io/fake-time: 设置虚假的时间
 
-Here's an example YAML file that illustrates how to add these annotations to a Pod:
-
-```yaml
-apiVersion: v1
-kind: Pod
-metadata:
-  name: testpod
-  namespace: kube-system
-  labels:
-    app: myapp
-    version: v1
-  annotations:
-    cloudnativegame.io/process-name: "hello"
-    cloudnativegame.io/fake-time: "2024-01-01 00:00:00"
-spec:
-  containers:
-    - name: myhello
-      image: registry.cn-hangzhou.aliyuncs.com/acs/hello:v1
-      volumeMounts:
-        - mountPath: /usr/local/lib/faketime
-          name: faketime
-  volumes:
-    - name: faketime
-      emptyDir: {}
-```
-将这个YAML文件保存到一个名为testpod.yaml的本地文件。然后，使用下面的命令来部署它：
-
-```yaml
-kubectl apply -f testpod.yaml
-```
-
-要进入myhello容器并测试时间是否被修改，使用以下命令：
-
-```
-kubectl exec -it testpod -c myhello /bin/bash -n kube-system
-```
-![example1](example/watchmakerexample.png)
-
-我们还提供了另一种方法修改容器的时间：
+下面是一个YAML文件的例子，说明了如何给pod添加annotation：
 
 ```yaml
 apiVersion: v1
@@ -301,15 +269,21 @@ spec:
           value: "@2024-01-01 00:00:00"
       name: myhello
       image: registry.cn-hangzhou.aliyuncs.com/acs/hello:v1
-      volumeMounts:
-        - mountPath: /usr/local/lib/faketime
-          name: faketime
-  volumes:
-    - name: faketime
-      emptyDir: {}
+```
+将这个YAML文件保存到一个名为testpod.yaml的本地文件。然后，使用下面的命令来部署它：
+
+```yaml
+kubectl apply -f testpod.yaml
 ```
 
-你也可以让命令在虚拟时间内执行
+要进入myhello容器并测试时间是否被修改，使用以下命令：
+
+```
+kubectl exec -it testpod -c myhello /bin/bash -n kube-system
+```
+![example1](example/watchmakerexample.png)
+
+我们还提供了另一种方法修改容器的时间,你也可以让命令以虚拟时间内执行:
 
 ![example2](example/libfaketimeexample.png)
 

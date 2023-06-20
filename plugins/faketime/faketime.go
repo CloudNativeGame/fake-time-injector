@@ -1,6 +1,7 @@
 package faketime
 
 import (
+	"fmt"
 	"github.com/CloudNativeGame/fake-time-injector/plugins/utils"
 	addmissionV1 "k8s.io/api/admission/v1"
 	apiv1 "k8s.io/api/core/v1"
@@ -46,12 +47,40 @@ func (s *FaketimePlugin) Patch(pod *apiv1.Pod, operation addmissionV1.Operation)
 				break
 			}
 		}
-		for _, initContainer := range pod.Spec.InitContainers {
-			if initContainer.Name == InitContainerName {
-				break
+
+		// add volume
+		var patchVolume bool
+		volumePath := "/spec/volumes"
+		var valueVolume interface{}
+		vol := apiv1.Volume{
+			Name: "faketime",
+			VolumeSource: apiv1.VolumeSource{
+				EmptyDir: &apiv1.EmptyDirVolumeSource{},
+			},
+		}
+		if len(pod.Spec.Volumes) == 0 {
+			valueVolume = []apiv1.Volume{vol}
+			patchVolume = true
+		} else {
+			if !hasVolume(pod, vol.Name) {
+				volumePath += "/-"
+				valueVolume = vol
+				patchVolume = true
 			}
 		}
+		if patchVolume {
+			addVolumePatch := utils.PatchOperation{
+				Op:    "add",
+				Path:  volumePath,
+				Value: valueVolume,
+			}
+			opPatches = append(opPatches, addVolumePatch)
+		}
+
 		// add init container
+		var patchInitContainer bool
+		var valueInitContainer interface{}
+		var initContainerPath = "/spec/initContainers"
 		var InitContainerImageName string
 		if image, ok := os.LookupEnv(LIBFAKETIME_IMAGE_ENV); ok {
 			InitContainerImageName = image
@@ -67,13 +96,54 @@ func (s *FaketimePlugin) Patch(pod *apiv1.Pod, operation addmissionV1.Operation)
 				},
 			},
 		}
-		pod.Spec.InitContainers = append(pod.Spec.InitContainers, initCon)
-		addInitConPatch := utils.PatchOperation{
-			Op:    "add",
-			Path:  "/spec/initContainers",
-			Value: pod.Spec.InitContainers,
+		if len(pod.Spec.InitContainers) == 0 {
+			valueInitContainer = []apiv1.Container{initCon}
+			patchInitContainer = true
+		} else {
+			if !hasInitContainer(pod, InitContainerName) {
+				initContainerPath += "/-"
+				valueInitContainer = initCon
+				patchInitContainer = true
+			}
 		}
-		opPatches = append(opPatches, addInitConPatch)
+		if patchInitContainer {
+			initContainerPatch := utils.PatchOperation{
+				Op:    "add",
+				Path:  initContainerPath,
+				Value: valueInitContainer,
+			}
+			opPatches = append(opPatches, initContainerPatch)
+		}
+
+		// add volumemount
+		var patchVolumeMount bool
+		var valueVolumeMount interface{}
+		var volumeMountPath string
+		vm := apiv1.VolumeMount{
+			Name:      "faketime",
+			MountPath: "/usr/local/lib/faketime",
+		}
+		for num, container := range pod.Spec.Containers {
+			if len(container.VolumeMounts) == 0 {
+				valueVolumeMount = []apiv1.VolumeMount{vm}
+				volumeMountPath = fmt.Sprintf("/spec/containers/%d/volumeMounts", num)
+				patchVolumeMount = true
+			} else {
+				if !hasVolumeMount(container, vm.Name) {
+					valueVolumeMount = vm
+					volumeMountPath = fmt.Sprintf("/spec/containers/%d/volumeMounts/-", num)
+					patchVolumeMount = true
+				}
+			}
+			if patchVolumeMount {
+				addConVolumeMountPatch := utils.PatchOperation{
+					Op:    "add",
+					Path:  volumeMountPath,
+					Value: valueVolumeMount,
+				}
+				opPatches = append(opPatches, addConVolumeMountPatch)
+			}
+		}
 
 		// add sidecar
 		var ContainerImageName string
@@ -89,13 +159,12 @@ func (s *FaketimePlugin) Patch(pod *apiv1.Pod, operation addmissionV1.Operation)
 			{Name: "modify_process_name", Value: pod.Annotations[ModifyProcessName]},
 			{Name: "delay_second", Value: strconv.Itoa(delaySecond)},
 		}
-		pod.Spec.Containers = append(pod.Spec.Containers, con)
-		addConPatch := utils.PatchOperation{
+		addSidecarPatch := utils.PatchOperation{
 			Op:    "add",
-			Path:  "/spec/containers",
-			Value: pod.Spec.Containers,
+			Path:  "/spec/containers/-",
+			Value: con,
 		}
-		opPatches = append(opPatches, addConPatch)
+		opPatches = append(opPatches, addSidecarPatch)
 		var isShareProcessNamespace = true
 		openShareProcessNamespace := utils.PatchOperation{
 			Op:    "add",
@@ -105,6 +174,33 @@ func (s *FaketimePlugin) Patch(pod *apiv1.Pod, operation addmissionV1.Operation)
 		opPatches = append(opPatches, openShareProcessNamespace)
 	}
 	return opPatches
+}
+
+func hasInitContainer(pod *apiv1.Pod, initContainerName string) bool {
+	for _, c := range pod.Spec.InitContainers {
+		if initContainerName == c.Name {
+			return true
+		}
+	}
+	return false
+}
+
+func hasVolume(pod *apiv1.Pod, volumeName string) bool {
+	for _, v := range pod.Spec.Volumes {
+		if v.Name == volumeName {
+			return true
+		}
+	}
+	return false
+}
+
+func hasVolumeMount(container apiv1.Container, volumeMountName string) bool {
+	for _, v := range container.VolumeMounts {
+		if v.Name == volumeMountName {
+			return true
+		}
+	}
+	return false
 }
 
 func calculateDelayTime(t string) int {
