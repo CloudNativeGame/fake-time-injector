@@ -153,7 +153,7 @@ func (s *FaketimePlugin) Patch(pod *apiv1.Pod, operation addmissionV1.Operation)
 		var ContainerEnvPath = "/spec/containers/%d/volumeMounts"
 		Env := []apiv1.EnvVar{
 			{Name: "LD_PRELOAD", Value: LibFakeTimePath},
-			{Name: "FAKETIME", Value: "@2024-01-01 00:00:00"},
+			{Name: "FAKETIME", Value: fmt.Sprintf("@%s", pod.Annotations[FakeTime])},
 		}
 		for num, c := range pod.Spec.Containers {
 			if len(c.Env) == 0 {

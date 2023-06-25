@@ -4,7 +4,11 @@
 
 ## overview
 
-fake-time-injector is a lightweight and flexible tool. With this tool, you can easily inject fake time values into your containers, allowing you to simulate different time scenarios and test the behavior of your applications under various time conditions
+fake-time-injector is a lightweight and flexible tool. using this tool, you can easily inject future fake time values into containers in order to simulate and test the behavior of your application in different time scenarios.
+
+fake-time-injector is a component used to modify simulation time in cloud-native scenarios, open-sourced by Aliyun and Lilith Games together through the CloudNativeGame community.
+
+![partners](../../images/partners.png)
 
 ## Plugin Supported Programming Languages
 
@@ -135,7 +139,7 @@ kind: Secret
 metadata:
   name: kubernetes-faketime-injector
   namespace: kube-system
-  EOF
+EOF
 
   kubectl apply -f secret.yaml
 ```
@@ -148,7 +152,6 @@ Deploy fake-time-injector using the following YAML file:
 ```yaml
 apiVersion: v1
 kind: ServiceAccount
-namespace: kube-system
 metadata:
   name: fake-time-injector-sa
   namespace: kube-system
@@ -199,7 +202,7 @@ spec:
         app: kubernetes-faketime-injector
     spec:
       containers:
-        - image: registry.cn-hangzhou.aliyuncs.com/acs/fake-time-injector:v1     // docker build -t fake-time-injector:v1 . -f fake-time-injector/Dockerfile
+        - image: registry.cn-hangzhou.aliyuncs.com/acs/fake-time-injector:v1     # docker build -t fake-time-injector:v1 . -f fake-time-injector/Dockerfile
           imagePullPolicy: Always
           name: kubernetes-faketime-injector
           resources:
@@ -213,7 +216,7 @@ spec:
             - name: LIBFAKETIME_PLUGIN_IMAGE
               value: "registry.cn-hangzhou.aliyuncs.com/acs/libfaketime:v1"
             - name: FAKETIME_PLUGIN_IMAGE
-              value: "registry.cn-hangzhou.aliyuncs.com/acs/fake-time-sidecar:v1"   // docker build -t fake-time-sidecar:v1 . -f fake-time-injector/plugins/faketime/build/Dockerfile
+              value: "registry.cn-hangzhou.aliyuncs.com/acs/fake-time-sidecar:v1"   # docker build -t fake-time-sidecar:v1 . -f fake-time-injector/plugins/faketime/build/Dockerfile
           volumeMounts:
             - name: webhook-certs
               mountPath: /run/secrets/tls
@@ -240,7 +243,7 @@ spec:
 Save this YAML file to a local file named deploy.yaml. Then, use the following command to deploy it:
 
 ```
-kubectl apply -f deploy/kubernetes-faketime-injector.yaml 
+kubectl apply -f deploy.yaml 
 ```
 
 ### step3: modify time
@@ -261,7 +264,7 @@ metadata:
     app: myapp
     version: v1
   annotations:
-    cloudnativegame.io/process-name: "hello"
+    cloudnativegame.io/process-name: "hello"      # If you need to modify multiple processes at the same time, just separate the process names with `,`
     cloudnativegame.io/fake-time: "2024-01-01 00:00:00"
 spec:
   containers:
@@ -279,11 +282,11 @@ To enter the myhello container and test that the time is modified, use the follo
 ```
 kubectl exec -it testpod -c myhello /bin/bash -n kube-system
 ```
-![example1](example/watchmakerexample.png)
+![example1](../../images/watchmakerexample.png)
 
 We also provide another method to modify the container's time, you can also have the command executed in virtual time
 
-![example2](example/libfaketimeexample.png)
+![example2](../../images/libfaketimeexample.png)
 
 ## Alternative Solution
 
@@ -303,7 +306,7 @@ spec:
       name: myhello
     - env:
         - name: modify_process_name
-          value: hello
+          value: hello           # If you need to modify multiple processes at the same time, just separate the process names with `,`
         - name: delay_second
           value: '86400'
       image: 'registry.cn-hangzhou.aliyuncs.com/acs/fake-time-sidecar:v1'
@@ -312,6 +315,6 @@ spec:
   shareProcessNamespace: true
 ```
 
-In this approach, you'll need to set two environment variables for the sidecar container: modify_process_name and delay_second. This will allow you to specify which process needs to modify the time, and the desired delay time accordingly.
+In this approach, you need to set two environment variables for the sidecar container: modify_process_name and delay_second. this will allow you to specify which process needs to modify the time, and the future time difference from this moment.
 
 Also, note that we've added shareProcessNamespace to the spec to ensure that both containers share the same process namespace.

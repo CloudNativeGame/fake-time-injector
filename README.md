@@ -4,7 +4,11 @@
 
 ## 概述
 
-fake-time-injector 是一个轻量级且灵活的工具。使用该工具，您可以轻松地将虚假时间值注入到容器中，以便在不同的时间场景下模拟和测试应用程序的行为。
+fake-time-injector 是一个轻量级且灵活的工具。使用该工具，您可以轻松地将未来的虚假时间值注入到容器中，以便在不同的时间场景下模拟和测试应用程序的行为。
+
+fake-time-injector是阿里云与莉莉丝游戏通过CloudNativeGame社区一起开源的用于云原生场景下修改模拟时间的组件。
+
+![partners](images/partners.png)
 
 ## 插件支持编程语言
 
@@ -120,7 +124,7 @@ cat server.pem | base64
 cat server-key.pem | base64
 ```
 
-* 使用上一步骤中的密钥生成 secret：
+* 使用前面步骤中的密钥生成 secret：
 
 ```shell
 cat > secret.yaml <<EOF
@@ -133,7 +137,7 @@ kind: Secret
 metadata:
   name: kubernetes-faketime-injector
   namespace: kube-system
-  EOF
+EOF
 
   kubectl apply -f secret.yaml
 ```
@@ -145,7 +149,6 @@ metadata:
 ```yaml
 apiVersion: v1
 kind: ServiceAccount
-namespace: kube-system
 metadata:
   name: fake-time-injector-sa
   namespace: kube-system
@@ -196,7 +199,7 @@ spec:
         app: kubernetes-faketime-injector
     spec:
       containers:
-        - image: registry.cn-hangzhou.aliyuncs.com/acs/fake-time-injector:v1     //  使用 fake-time-injector/Dockerfile 创建镜像
+        - image: registry.cn-hangzhou.aliyuncs.com/acs/fake-time-injector:v1     #  使用 fake-time-injector/Dockerfile 创建镜像
           imagePullPolicy: Always
           name: kubernetes-faketime-injector
           resources:
@@ -210,7 +213,7 @@ spec:
             - name: LIBFAKETIME_PLUGIN_IMAGE
               value: "registry.cn-hangzhou.aliyuncs.com/acs/libfaketime:v1"
             - name: FAKETIME_PLUGIN_IMAGE
-              value: "registry.cn-hangzhou.aliyuncs.com/acs/fake-time-sidecar:v1"   // 使用 fake-time-injector/plugins/faketime/build/Dockerfile 创建镜像
+              value: "registry.cn-hangzhou.aliyuncs.com/acs/fake-time-sidecar:v1"   # 使用 fake-time-injector/plugins/faketime/build/Dockerfile 创建镜像
           volumeMounts:
             - name: webhook-certs
               mountPath: /run/secrets/tls
@@ -237,7 +240,7 @@ spec:
 将这个YAML文件保存到一个名为deploy.yaml的文件中。然后使用下面的命令来部署它：
 
 ```
-kubectl apply -f deploy/kubernetes-faketime-injector.yaml 
+kubectl apply -f deploy.yaml 
 ```
 
 ### step3: 修改时间
@@ -258,7 +261,7 @@ metadata:
     app: myapp
     version: v1
   annotations:
-    cloudnativegame.io/process-name: "hello"
+    cloudnativegame.io/process-name: "hello"     # 如果需要同时修改多个进程用`,`隔开进程名即可
     cloudnativegame.io/fake-time: "2024-01-01 00:00:00"
 spec:
   containers:
@@ -276,11 +279,11 @@ kubectl apply -f testpod.yaml
 ```
 kubectl exec -it testpod -c myhello /bin/bash -n kube-system
 ```
-![example1](example/watchmakerexample.png)
+![example1](images/watchmakerexample.png)
 
 我们还提供了另一种方法修改容器的时间,你也可以让命令以虚拟时间内执行:
 
-![example2](example/libfaketimeexample.png)
+![example2](images/libfaketimeexample.png)
 
 ## 替代方案
 
@@ -300,7 +303,7 @@ spec:
       name: myhello
     - env:
         - name: modify_process_name
-          value: hello
+          value: hello               # 如果需要同时修改多个进程用`,`隔开进程名即可
         - name: delay_second
           value: '86400'
       image: 'registry.cn-hangzhou.aliyuncs.com/acs/fake-time-sidecar:v1'
@@ -309,6 +312,6 @@ spec:
   shareProcessNamespace: true
 ```
 
-在这种方法中，你需要为sidecar容器设置两个环境变量：modify_process_name 和 delay_second。这将允许你指定哪个进程需要修改时间，以及相应的所需延迟时间。
+在这种方法中，你需要为sidecar容器设置两个环境变量：modify_process_name 和 delay_second。这将允许你指定哪个进程需要修改时间，以及未来相距此刻的时间差。
 
 另外请注意，我们在`spec`中加入了 shareProcessNamespace，以确保两个容器共享相同的进程命名空间。
