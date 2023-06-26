@@ -318,3 +318,10 @@ spec:
 In this approach, you need to set two environment variables for the sidecar container: modify_process_name and delay_second. this will allow you to specify which process needs to modify the time, and the future time difference from this moment.
 
 Also, note that we've added shareProcessNamespace to the spec to ensure that both containers share the same process namespace.
+
+## Dependencies
+
+This project uses the following open-source software:
+
+* [Chaos-mesh](https://github.com/chaos-mesh/chaos-mesh) - Reference chaos-mesh's watchmaker component to simulate process time
+* [Libfaketime](https://github.com/wolfcw/libfaketime) - Reference the libfaketime dynamic link library to simulate time

@@ -315,3 +315,10 @@ spec:
 在这种方法中，你需要为sidecar容器设置两个环境变量：modify_process_name 和 delay_second。这将允许你指定哪个进程需要修改时间，以及未来相距此刻的时间差。
 
 另外请注意，我们在`spec`中加入了 shareProcessNamespace，以确保两个容器共享相同的进程命名空间。
+
+## 依赖项
+
+此项目使用以下开源软件：
+
+* [Chaos-mesh](https://github.com/chaos-mesh/chaos-mesh) - 引用 chaos-mesh 的 watchmaker 组件来模拟进程时间
+* [Libfaketime](https://github.com/wolfcw/libfaketime) - 引用 libfaketime 动态链接库来模拟时间
