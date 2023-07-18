@@ -199,7 +199,7 @@ spec:
         app: kubernetes-faketime-injector
     spec:
       containers:
-        - image: registry.cn-hangzhou.aliyuncs.com/acs/fake-time-injector:v1     #  使用 fake-time-injector/Dockerfile 创建镜像
+        - image: registry.cn-hangzhou.aliyuncs.com/acs/fake-time-injector:v2     #  使用 fake-time-injector/Dockerfile 创建镜像
           imagePullPolicy: Always
           name: kubernetes-faketime-injector
           resources:

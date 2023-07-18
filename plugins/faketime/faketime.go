@@ -150,7 +150,7 @@ func (s *FaketimePlugin) Patch(pod *apiv1.Pod, operation addmissionV1.Operation)
 		//add container env
 		var patchContainerEnv bool
 		var valueContainerEnv interface{}
-		var ContainerEnvPath = "/spec/containers/%d/volumeMounts"
+		var ContainerEnvPath string
 		Env := []apiv1.EnvVar{
 			{Name: "LD_PRELOAD", Value: LibFakeTimePath},
 			{Name: "FAKETIME", Value: fmt.Sprintf("@%s", pod.Annotations[FakeTime])},
@@ -161,8 +161,9 @@ func (s *FaketimePlugin) Patch(pod *apiv1.Pod, operation addmissionV1.Operation)
 				valueContainerEnv = append([]apiv1.EnvVar{}, Env...)
 				patchContainerEnv = true
 			} else {
-				ContainerEnvPath = fmt.Sprintf("/spec/containers/%d/env/-", num)
+				ContainerEnvPath = fmt.Sprintf("/spec/containers/%d/env", num)
 				c.Env = append(c.Env, Env...)
+				valueContainerEnv = append([]apiv1.EnvVar{}, c.Env...)
 				patchContainerEnv = true
 			}
 			if patchContainerEnv {
