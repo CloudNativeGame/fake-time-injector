@@ -7,6 +7,7 @@ import (
 	apiv1 "k8s.io/api/core/v1"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -20,7 +21,19 @@ const (
 	LIBFAKETIME_IMAGE_ENV = "LIBFAKETIME_PLUGIN_IMAGE"
 	LibFakeTimePath       = "/usr/local/lib/faketime/libfaketime.so.1"
 	LibFakeTimeMountPath  = "/usr/local/lib/faketime"
+	CLUSTER_MODE_ENV      = "CLUSTER_MODE"
+	NamespaceDelayTimeout = 40 * time.Second
 )
+
+var (
+	delaySecondGroup = make(map[string]namespaceDelayEntry)
+	mu               sync.Mutex
+)
+
+type namespaceDelayEntry struct {
+	Value   int
+	Timeout *time.Timer
+}
 
 type FaketimePlugin struct {
 }
@@ -37,10 +50,35 @@ func (s *FaketimePlugin) MatchAnnotations(podAnnots map[string]string) bool {
 }
 
 func (s *FaketimePlugin) Patch(pod *apiv1.Pod, operation addmissionV1.Operation) []utils.PatchOperation {
-	delaySecond := calculateDelayTime(pod.Annotations[FakeTime])
-	if delaySecond < 0 {
-		return []utils.PatchOperation{}
+	var delaySecond int
+	val, ok := os.LookupEnv(CLUSTER_MODE_ENV)
+	if ok && val == "true" {
+		if entry, exists := delaySecondGroup[pod.Namespace]; exists {
+			// 如果键已存在，则直接使用同一个namespace的偏移量
+			fmt.Printf("Key %q already exists, using value: %d\n", pod.Namespace, entry.Value)
+			delaySecond = entry.Value
+		} else {
+			delaySecond = calculateDelayTime(pod.Annotations[FakeTime])
+			if delaySecond < 0 {
+				return []utils.PatchOperation{}
+			}
+
+			keyEntry := namespaceDelayEntry{
+				Value:   delaySecond,
+				Timeout: time.AfterFunc(NamespaceDelayTimeout, func() { removeNamespaceDelayKey(pod.Namespace) }),
+			}
+
+			delaySecondGroup[pod.Namespace] = keyEntry
+		}
 	}
+
+	if !ok || val == "false" {
+		delaySecond = calculateDelayTime(pod.Annotations[FakeTime])
+		if delaySecond < 0 {
+			return []utils.PatchOperation{}
+		}
+	}
+
 	var opPatches []utils.PatchOperation
 	switch operation {
 	case addmissionV1.Create:
@@ -244,4 +282,15 @@ func calculateDelayTime(t string) int {
 
 func NewSgPlugin() *FaketimePlugin {
 	return &FaketimePlugin{}
+}
+
+func removeNamespaceDelayKey(key string) {
+	mu.Lock()
+	defer mu.Unlock()
+
+	if entry, exists := delaySecondGroup[key]; exists {
+		delete(delaySecondGroup, key)
+		entry.Timeout.Stop()
+		fmt.Printf("Key %q has been cleaned\n", key)
+	}
 }
