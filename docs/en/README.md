@@ -84,7 +84,7 @@ spec:
         app: kubernetes-faketime-injector
     spec:
       containers:
-        - image: registry.cn-hangzhou.aliyuncs.com/acs/fake-time-injector:v1     # docker build -t fake-time-injector:v1 . -f fake-time-injector/Dockerfile
+        - image: registry.cn-hangzhou.aliyuncs.com/acs/fake-time-injector:v2.1     # docker build -t fake-time-injector:v1 . -f fake-time-injector/Dockerfile
           imagePullPolicy: Always
           name: kubernetes-faketime-injector
           resources:
@@ -125,11 +125,38 @@ kubectl apply -f deploy.yaml
 
 ### step2: modify time
 
-To use the injector, you need to add two annotations to the pod:
+We provide two ways to modify process time, the watchmaker command and the libfaketime link library.
+
+The libfaketime link library configuration method, add annotation:
+Supported languages: python, c, ruby, php, c++, js, java, erlang
+* cloudnativegame.io/fake-time: sets the fake time
+
+example of yaml configuration:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test
+  namespace: kube-system
+  labels:
+    app: myapp
+    version: v1
+  annotations:
+    cloudnativegame.io/fake-time: "2024-01-01 00:00:00"  # Here you can also configure '-3h', '6h', '6d', '-' to indicate past time.
+spec:
+  containers:
+    - name: test
+      image: registry.cn-hangzhou.aliyuncs.com/acs/testc:v1
+```
+
+Add the following annotation to the watchmaker configuration method.
+Supported languages: go, python, ruby, php, c++
 * cloudnativegame.io/process-name: sets the process that needs to modify the time
 * cloudnativegame.io/fake-time: sets the fake time
 
-Here's an example YAML file that illustrates how to add these annotations to a Pod:
+
+example of yaml configuration:
 
 ```yaml
 apiVersion: v1
@@ -141,8 +168,8 @@ metadata:
     app: myapp
     version: v1
   annotations:
-    cloudnativegame.io/process-name: "hello"      # If you need to modify multiple processes at the same time, just separate the process names with `,`
-    cloudnativegame.io/fake-time: "2024-01-01 00:00:00"
+    cloudnativegame.io/process-name: "hello"     # If you need to modify multiple processes at the same time, just separate the process names with `,`
+    cloudnativegame.io/fake-time: "2024-01-01 00:00:00"    # Here you can also configure the number of seconds to adjust, '86400' means that the time drifts back one day, watchmaker does not support past times.
 spec:
   containers:
     - name: myhello

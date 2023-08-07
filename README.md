@@ -83,7 +83,7 @@ spec:
         app: kubernetes-faketime-injector
     spec:
       containers:
-        - image: registry.cn-hangzhou.aliyuncs.com/acs/fake-time-injector:v1     #  使用 fake-time-injector/Dockerfile 创建镜像
+        - image: registry.cn-hangzhou.aliyuncs.com/acs/fake-time-injector:v2.1     #  使用 fake-time-injector/Dockerfile 创建镜像
           imagePullPolicy: Always
           name: kubernetes-faketime-injector
           resources:
@@ -124,11 +124,37 @@ kubectl apply -f deploy.yaml
 
 ### step2: 修改时间
 
-要使用fake-time-injector，你需要向pod添加两个注解：
+我们提供两种修改进程时间的方法，watchmaker指令和libfaketime链接库。
+
+libfaketime链接库配置方法，添加annotation：
+支持语言：python、c、ruby、php、c++、js、java、erlang
+* cloudnativegame.io/fake-time: 设置虚假的时间
+
+yaml配置示例:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test
+  namespace: kube-system
+  labels:
+    app: myapp
+    version: v1
+  annotations:
+    cloudnativegame.io/fake-time: "2024-01-01 00:00:00"  # 此处还可以配置'-3h'， '6h'， '6d'， '-'表示过去的时间。
+spec:
+  containers:
+    - name: test
+      image: registry.cn-hangzhou.aliyuncs.com/acs/testc:v1
+```
+
+watchmaker配置方法,增加如下annotation。
+支持语言：go、python、ruby、php、c++
 * cloudnativegame.io/process-name: 设置需要修改时间的进程
 * cloudnativegame.io/fake-time: 设置虚假的时间
 
-下面是一个YAML文件的例子，说明了如何给pod添加annotation：
+yaml配置示例:
 
 ```yaml
 apiVersion: v1
@@ -141,12 +167,13 @@ metadata:
     version: v1
   annotations:
     cloudnativegame.io/process-name: "hello"     # 如果需要同时修改多个进程用`,`隔开进程名即可
-    cloudnativegame.io/fake-time: "2024-01-01 00:00:00"
+    cloudnativegame.io/fake-time: "2024-01-01 00:00:00"     # 此处还可以配置调整的秒数，'86400'表示时间向后漂移一天，watchmaker不支持过去的时间。
 spec:
   containers:
     - name: myhello
       image: registry.cn-hangzhou.aliyuncs.com/acs/hello:v1
 ```
+
 将这个YAML文件保存到一个名为testpod.yaml的本地文件。然后，使用下面的命令来部署它：
 
 ```yaml

@@ -32,40 +32,6 @@ roleRef:
   name: fake-time-injector-cr
   apiGroup: rbac.authorization.k8s.io
 ---
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: fake-time-injector-sa
-  namespace: kube-system
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: fake-time-injector-cr
-rules:
-  - apiGroups: [""]
-    resources: ["pods"]
-    verbs: ["get", "list", "patch", "update", "watch"]
-  - apiGroups: [""]
-    resources: ["secrets"]
-    verbs: ["get", "list"]
-  - apiGroups: ["admissionregistration.k8s.io"]
-    resources: ["mutatingwebhookconfigurations"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: fake-time-injector-rb
-subjects:
-  - kind: ServiceAccount
-    name: fake-time-injector-sa
-    namespace: kube-system
-roleRef:
-  kind: ClusterRole
-  name: fake-time-injector-cr
-  apiGroup: rbac.authorization.k8s.io
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -84,7 +50,7 @@ spec:
         app: kubernetes-faketime-injector
     spec:
       containers:
-        - image: registry.cn-hangzhou.aliyuncs.com/acs/fake-time-injector:v1     #  使用 fake-time-injector/Dockerfile 创建镜像
+        - image: registry.cn-hangzhou.aliyuncs.com/acs/fake-time-injector:v2.1     #  使用 fake-time-injector/Dockerfile 创建镜像
           imagePullPolicy: Always
           name: kubernetes-faketime-injector
           resources:
@@ -95,18 +61,13 @@ spec:
               cpu: 100m
               memory: 100Mi
           env:
+            - name: CLUSTER_MODE     # CLUSTER_MODE为true时，命名空间内的所有pod在一定时间范围内(40s)启动时获得一致的偏移量
+              value: "true"
             - name: LIBFAKETIME_PLUGIN_IMAGE
               value: "registry.cn-hangzhou.aliyuncs.com/acs/libfaketime:v1"
             - name: FAKETIME_PLUGIN_IMAGE
-              value: "registry.cn-hangzhou.aliyuncs.com/acs/fake-time-sidecar:v1"   # 使用 fake-time-injector/plugins/faketime/build/Dockerfile 创建镜像
-          volumeMounts:
-            - name: webhook-certs
-              mountPath: /run/secrets/tls
+              value: "registry.cn-hangzhou.aliyuncs.com/acs/fake-time-sidecar:v2"   # 使用 fake-time-injector/plugins/faketime/build/Dockerfile 创建镜像
       serviceAccountName:  fake-time-injector-sa
-      volumes:
-        - name: webhook-certs
-          secret:
-            secretName: kubernetes-faketime-injector
 ---
 kind: Service
 apiVersion: v1

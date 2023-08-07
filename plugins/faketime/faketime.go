@@ -5,8 +5,10 @@ import (
 	"github.com/CloudNativeGame/fake-time-injector/plugins/utils"
 	addmissionV1 "k8s.io/api/admission/v1"
 	apiv1 "k8s.io/api/core/v1"
+	"k8s.io/klog"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -31,7 +33,7 @@ var (
 )
 
 type namespaceDelayEntry struct {
-	Value   int
+	Value   string
 	Timeout *time.Timer
 }
 
@@ -43,28 +45,25 @@ func (s *FaketimePlugin) Name() string {
 }
 
 func (s *FaketimePlugin) MatchAnnotations(podAnnots map[string]string) bool {
-	if podAnnots[ModifyProcessName] != "" && podAnnots[FakeTime] != "" {
+	if podAnnots[FakeTime] != "" {
 		return true
 	}
 	return false
 }
 
 func (s *FaketimePlugin) Patch(pod *apiv1.Pod, operation addmissionV1.Operation) []utils.PatchOperation {
-	var delaySecond int
+	var delayTIme string
 	val, ok := os.LookupEnv(CLUSTER_MODE_ENV)
 	if ok && val == "true" {
 		if entry, exists := delaySecondGroup[pod.Namespace]; exists {
-			// 如果键已存在，则直接使用同一个namespace的偏移量
-			fmt.Printf("Key %q already exists, using value: %d\n", pod.Namespace, entry.Value)
-			delaySecond = entry.Value
+			// 如果键已存在，则直接使用同一个namespace虚假时间
+			fmt.Printf("Key %q already exists, using value: %s\n", pod.Namespace, entry.Value)
+			delayTIme = entry.Value
 		} else {
-			delaySecond = calculateDelayTime(pod.Annotations[FakeTime])
-			if delaySecond < 0 {
-				return []utils.PatchOperation{}
-			}
+			delayTIme = pod.Annotations[FakeTime]
 
 			keyEntry := namespaceDelayEntry{
-				Value:   delaySecond,
+				Value:   delayTIme,
 				Timeout: time.AfterFunc(NamespaceDelayTimeout, func() { removeNamespaceDelayKey(pod.Namespace) }),
 			}
 
@@ -73,10 +72,8 @@ func (s *FaketimePlugin) Patch(pod *apiv1.Pod, operation addmissionV1.Operation)
 	}
 
 	if !ok || val == "false" {
-		delaySecond = calculateDelayTime(pod.Annotations[FakeTime])
-		if delaySecond < 0 {
-			return []utils.PatchOperation{}
-		}
+		delayTIme = pod.Annotations[FakeTime]
+
 	}
 
 	var opPatches []utils.PatchOperation
@@ -88,161 +85,196 @@ func (s *FaketimePlugin) Patch(pod *apiv1.Pod, operation addmissionV1.Operation)
 			}
 		}
 
-		// add volume
-		var patchVolume bool
-		volumePath := "/spec/volumes"
-		var valueVolume interface{}
-		vol := apiv1.Volume{
-			Name: "faketime",
-			VolumeSource: apiv1.VolumeSource{
-				EmptyDir: &apiv1.EmptyDirVolumeSource{},
-			},
-		}
-		if len(pod.Spec.Volumes) == 0 {
-			valueVolume = []apiv1.Volume{vol}
-			patchVolume = true
+		// annotations设置‘cloudnativegame.io/process-name’则创建watchmaker修改进程时间，反之则使用libfaketime链接库修改时间
+		_, ok = pod.Annotations[ModifyProcessName]
+		if ok {
+			opPatches = watchMakerPatches(pod, delayTIme, opPatches)
 		} else {
-			if !hasVolume(pod, vol.Name) {
-				volumePath += "/-"
-				valueVolume = vol
-				patchVolume = true
-			}
-		}
-		if patchVolume {
-			addVolumePatch := utils.PatchOperation{
-				Op:    "add",
-				Path:  volumePath,
-				Value: valueVolume,
-			}
-			opPatches = append(opPatches, addVolumePatch)
+
+			opPatches = libFakeTimePatches(pod, delayTIme, opPatches)
 		}
 
-		// add init container
-		var patchInitContainer bool
-		var valueInitContainer interface{}
-		var initContainerPath = "/spec/initContainers"
-		var InitContainerImageName string
-		if image, ok := os.LookupEnv(LIBFAKETIME_IMAGE_ENV); ok {
-			InitContainerImageName = image
-		}
-		initCon := apiv1.Container{
-			Image:           InitContainerImageName,
-			Name:            InitContainerName,
-			ImagePullPolicy: apiv1.PullAlways,
-			VolumeMounts: []apiv1.VolumeMount{
-				{
-					Name:      "faketime",
-					MountPath: LibFakeTimeMountPath,
-				},
-			},
-		}
-		if len(pod.Spec.InitContainers) == 0 {
-			valueInitContainer = []apiv1.Container{initCon}
-			patchInitContainer = true
-		} else {
-			if !hasInitContainer(pod, InitContainerName) {
-				initContainerPath += "/-"
-				valueInitContainer = initCon
-				patchInitContainer = true
-			}
-		}
-		if patchInitContainer {
-			initContainerPatch := utils.PatchOperation{
-				Op:    "add",
-				Path:  initContainerPath,
-				Value: valueInitContainer,
-			}
-			opPatches = append(opPatches, initContainerPatch)
-		}
-
-		// add volumemount
-		var patchVolumeMount bool
-		var valueVolumeMount interface{}
-		var volumeMountPath string
-		vm := apiv1.VolumeMount{
-			Name:      "faketime",
-			MountPath: LibFakeTimeMountPath,
-		}
-		for num, container := range pod.Spec.Containers {
-			if len(container.VolumeMounts) == 0 {
-				valueVolumeMount = []apiv1.VolumeMount{vm}
-				volumeMountPath = fmt.Sprintf("/spec/containers/%d/volumeMounts", num)
-				patchVolumeMount = true
-			} else {
-				if !hasVolumeMount(container, vm.Name) {
-					valueVolumeMount = vm
-					volumeMountPath = fmt.Sprintf("/spec/containers/%d/volumeMounts/-", num)
-					patchVolumeMount = true
-				}
-			}
-			if patchVolumeMount {
-				addConVolumeMountPatch := utils.PatchOperation{
-					Op:    "add",
-					Path:  volumeMountPath,
-					Value: valueVolumeMount,
-				}
-				opPatches = append(opPatches, addConVolumeMountPatch)
-			}
-		}
-
-		//add container env
-		var patchContainerEnv bool
-		var valueContainerEnv interface{}
-		var ContainerEnvPath string
-		Env := []apiv1.EnvVar{
-			{Name: "LD_PRELOAD", Value: LibFakeTimePath},
-			{Name: "FAKETIME", Value: fmt.Sprintf("@%s", pod.Annotations[FakeTime])},
-		}
-		for num, c := range pod.Spec.Containers {
-			if len(c.Env) == 0 {
-				ContainerEnvPath = fmt.Sprintf("/spec/containers/%d/env", num)
-				valueContainerEnv = append([]apiv1.EnvVar{}, Env...)
-				patchContainerEnv = true
-			} else {
-				ContainerEnvPath = fmt.Sprintf("/spec/containers/%d/env", num)
-				c.Env = append(c.Env, Env...)
-				valueContainerEnv = append([]apiv1.EnvVar{}, c.Env...)
-				patchContainerEnv = true
-			}
-			if patchContainerEnv {
-				addContainerEnvPatch := utils.PatchOperation{
-					Op:    "add",
-					Path:  ContainerEnvPath,
-					Value: valueContainerEnv,
-				}
-				opPatches = append(opPatches, addContainerEnvPatch)
-			}
-		}
-
-		// add sidecar
-		var ContainerImageName string
-		if image, ok := os.LookupEnv(IMAGE_ENV); ok {
-			ContainerImageName = image
-		}
-		con := apiv1.Container{
-			Image:           ContainerImageName,
-			Name:            ContainerName,
-			ImagePullPolicy: apiv1.PullAlways,
-		}
-		con.Env = []apiv1.EnvVar{
-			{Name: "modify_process_name", Value: pod.Annotations[ModifyProcessName]},
-			{Name: "delay_second", Value: strconv.Itoa(delaySecond)},
-		}
-		addSidecarPatch := utils.PatchOperation{
-			Op:    "add",
-			Path:  "/spec/containers/-",
-			Value: con,
-		}
-		opPatches = append(opPatches, addSidecarPatch)
-		var isShareProcessNamespace = true
-		openShareProcessNamespace := utils.PatchOperation{
-			Op:    "add",
-			Path:  "/spec/shareProcessNamespace",
-			Value: &isShareProcessNamespace,
-		}
-		opPatches = append(opPatches, openShareProcessNamespace)
 	}
 	return opPatches
+}
+
+func libFakeTimePatches(pod *apiv1.Pod, delayTIme string, opPatches []utils.PatchOperation) []utils.PatchOperation {
+	// add volume
+	var patchVolume bool
+	volumePath := "/spec/volumes"
+	var valueVolume interface{}
+	vol := apiv1.Volume{
+		Name: "faketime",
+		VolumeSource: apiv1.VolumeSource{
+			EmptyDir: &apiv1.EmptyDirVolumeSource{},
+		},
+	}
+	if len(pod.Spec.Volumes) == 0 {
+		valueVolume = []apiv1.Volume{vol}
+		patchVolume = true
+	} else {
+		if !hasVolume(pod, vol.Name) {
+			volumePath += "/-"
+			valueVolume = vol
+			patchVolume = true
+		}
+	}
+	if patchVolume {
+		addVolumePatch := utils.PatchOperation{
+			Op:    "add",
+			Path:  volumePath,
+			Value: valueVolume,
+		}
+		opPatches = append(opPatches, addVolumePatch)
+	}
+
+	// add init container
+	var patchInitContainer bool
+	var valueInitContainer interface{}
+	var initContainerPath = "/spec/initContainers"
+	var InitContainerImageName string
+	if image, ok := os.LookupEnv(LIBFAKETIME_IMAGE_ENV); ok {
+		InitContainerImageName = image
+	}
+	initCon := apiv1.Container{
+		Image:           InitContainerImageName,
+		Name:            InitContainerName,
+		ImagePullPolicy: apiv1.PullAlways,
+		VolumeMounts: []apiv1.VolumeMount{
+			{
+				Name:      "faketime",
+				MountPath: LibFakeTimeMountPath,
+			},
+		},
+	}
+	if len(pod.Spec.InitContainers) == 0 {
+		valueInitContainer = []apiv1.Container{initCon}
+		patchInitContainer = true
+	} else {
+		if !hasInitContainer(pod, InitContainerName) {
+			initContainerPath += "/-"
+			valueInitContainer = initCon
+			patchInitContainer = true
+		}
+	}
+	if patchInitContainer {
+		initContainerPatch := utils.PatchOperation{
+			Op:    "add",
+			Path:  initContainerPath,
+			Value: valueInitContainer,
+		}
+		opPatches = append(opPatches, initContainerPatch)
+	}
+
+	// add volumemount
+	var patchVolumeMount bool
+	var valueVolumeMount interface{}
+	var volumeMountPath string
+	vm := apiv1.VolumeMount{
+		Name:      "faketime",
+		MountPath: LibFakeTimeMountPath,
+	}
+	for num, container := range pod.Spec.Containers {
+		if len(container.VolumeMounts) == 0 {
+			valueVolumeMount = []apiv1.VolumeMount{vm}
+			volumeMountPath = fmt.Sprintf("/spec/containers/%d/volumeMounts", num)
+			patchVolumeMount = true
+		} else {
+			if !hasVolumeMount(container, vm.Name) {
+				valueVolumeMount = vm
+				volumeMountPath = fmt.Sprintf("/spec/containers/%d/volumeMounts/-", num)
+				patchVolumeMount = true
+			}
+		}
+		if patchVolumeMount {
+			addConVolumeMountPatch := utils.PatchOperation{
+				Op:    "add",
+				Path:  volumeMountPath,
+				Value: valueVolumeMount,
+			}
+			opPatches = append(opPatches, addConVolumeMountPatch)
+		}
+	}
+
+	//add container env
+	var fakeTime string
+	var patchContainerEnv bool
+	var valueContainerEnv interface{}
+	var ContainerEnvPath string
+	if strings.Contains(delayTIme, ":") {
+		fakeTime = fmt.Sprintf("@%s", delayTIme)
+	} else {
+		fakeTime = delayTIme
+	}
+	Env := []apiv1.EnvVar{
+		{Name: "LD_PRELOAD", Value: LibFakeTimePath},
+		{Name: "FAKETIME", Value: fakeTime},
+	}
+	for num, c := range pod.Spec.Containers {
+		if len(c.Env) == 0 {
+			ContainerEnvPath = fmt.Sprintf("/spec/containers/%d/env", num)
+			valueContainerEnv = append([]apiv1.EnvVar{}, Env...)
+			patchContainerEnv = true
+		} else {
+			ContainerEnvPath = fmt.Sprintf("/spec/containers/%d/env", num)
+			c.Env = append(c.Env, Env...)
+			valueContainerEnv = append([]apiv1.EnvVar{}, c.Env...)
+			patchContainerEnv = true
+		}
+		if patchContainerEnv {
+			addContainerEnvPatch := utils.PatchOperation{
+				Op:    "add",
+				Path:  ContainerEnvPath,
+				Value: valueContainerEnv,
+			}
+			opPatches = append(opPatches, addContainerEnvPatch)
+		}
+	}
+
+	return opPatches
+}
+
+func watchMakerPatches(pod *apiv1.Pod, delayTIme string, opPatches []utils.PatchOperation) []utils.PatchOperation {
+	var ContainerImageName, fakeTime string
+
+	if strings.Contains(delayTIme, ":") {
+		t := calculateDelayTime(delayTIme)
+		if t < 0 {
+			klog.Info("Setting future times is currently only supported in watchmaker")
+			return []utils.PatchOperation{}
+		}
+		fakeTime = strconv.Itoa(t)
+	} else {
+		fakeTime = delayTIme
+	}
+
+	if image, ok := os.LookupEnv(IMAGE_ENV); ok {
+		ContainerImageName = image
+	}
+	con := apiv1.Container{
+		Image:           ContainerImageName,
+		Name:            ContainerName,
+		ImagePullPolicy: apiv1.PullAlways,
+	}
+	con.Env = []apiv1.EnvVar{
+		{Name: "modify_process_name", Value: pod.Annotations[ModifyProcessName]},
+		{Name: "delay_second", Value: fakeTime},
+	}
+	addSidecarPatch := utils.PatchOperation{
+		Op:    "add",
+		Path:  "/spec/containers/-",
+		Value: con,
+	}
+	opPatches = append(opPatches, addSidecarPatch)
+	var isShareProcessNamespace = true
+	openShareProcessNamespace := utils.PatchOperation{
+		Op:    "add",
+		Path:  "/spec/shareProcessNamespace",
+		Value: &isShareProcessNamespace,
+	}
+	opPatches = append(opPatches, openShareProcessNamespace)
+	return opPatches
+
 }
 
 func hasInitContainer(pod *apiv1.Pod, initContainerName string) bool {
@@ -273,8 +305,11 @@ func hasVolumeMount(container apiv1.Container, volumeMountName string) bool {
 }
 
 func calculateDelayTime(t string) int {
-	t1, _ := time.Parse("2006-01-02 15:04:05", t)
-	t2 := time.Now()
+	t1, err := time.Parse("2006-01-02 15:04:05", t)
+	if err != nil {
+		klog.Error("failed parse time in watchmaker")
+	}
+	t2 := time.Now().UTC()
 	duration := t1.Sub(t2)
 	seconds := int(duration.Seconds())
 	return seconds
