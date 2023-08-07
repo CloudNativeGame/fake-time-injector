@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/clientcmd"
 	log "k8s.io/klog"
 	"net/http"
 	"strconv"
@@ -147,7 +148,7 @@ func (ws *WebHookServer) mutate(ar *addmissionV1.AdmissionReview) *addmissionV1.
 		log.V(5).Infof("Successfully patch pod %s in %s with pathOps %v", pod.Name, pod.Namespace, string(patchBytes))
 		return response
 	}
-	log.Info("before return AdmissionResponse")
+
 	return &addmissionV1.AdmissionResponse{
 		Allowed: true,
 	}
@@ -155,68 +156,90 @@ func (ws *WebHookServer) mutate(ar *addmissionV1.AdmissionReview) *addmissionV1.
 
 // register MutatingWebHookConfiguration
 func (ws *WebHookServer) registerMutatingWebhookConfiguration() error {
-	mutatingConfigs := ws.clientSet.AdmissionregistrationV1().MutatingWebhookConfigurations()
-	conf, err := mutatingConfigs.Get(context.Background(), MutatingWebhookConfigurationName, metav1.GetOptions{})
+
+	//parse service port to int32 pointer
+	port, err := strconv.ParseInt(ws.Options.Port, 10, 32)
 	if err != nil {
-		if errors.IsNotFound(err) {
-			// todo create a new one
-			mutatingRules := []mutateV1.RuleWithOperations{
+		return err
+	}
+	portInt32 := int32(port)
+	config, err := clientcmd.BuildConfigFromFlags("", ws.Options.KubeConf)
+	if err != nil {
+		return err
+	}
+	clientSet, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return err
+	}
+
+	sideEffectClassNone := mutateV1.SideEffectClassNone
+	ignore := mutateV1.Ignore
+	webhook := []mutateV1.MutatingWebhook{
+		{
+			Name:                    ws.Options.DnsName,
+			SideEffects:             &sideEffectClassNone,
+			FailurePolicy:           &ignore,
+			AdmissionReviewVersions: []string{"v1", "v1beta1"},
+			ClientConfig: mutateV1.WebhookClientConfig{
+				Service: &mutateV1.ServiceReference{
+					Namespace: ws.Options.ServiceNamespace,
+					Name:      ws.Options.ServiceName,
+					Port:      &portInt32,
+					Path:      &MutatingWebhookConfigurationPath,
+				},
+				CABundle: ws.Options.CaCert.CACert,
+			},
+			Rules: []mutateV1.RuleWithOperations{
 				{
-					Operations: []mutateV1.OperationType{mutateV1.Create},
+					Operations: []mutateV1.OperationType{mutateV1.Create, mutateV1.Update, mutateV1.Delete},
 					Rule: mutateV1.Rule{
 						APIGroups:   []string{""},
 						APIVersions: []string{"v1"},
 						Resources:   []string{"pods"},
 					},
 				},
-			}
-
-			// read ca cert data from path
-			caCert, err := ioutil.ReadFile(ws.Options.TLSCaCertPath)
-			if err != nil {
-				return err
-			}
-
-			// parse service port to int32 pointer
-			port, err := strconv.ParseInt(ws.Options.Port, 10, 32)
-			if err != nil {
-				return err
-			}
-			portInt32 := int32(port)
-			SideEffects := mutateV1.SideEffectClassNone
-			mutatingWebHook := mutateV1.MutatingWebhook{
-				SideEffects:             &SideEffects,
-				AdmissionReviewVersions: []string{"v1"},
-				Name:                    "kubernetes-faketime-injector.ack.aliyun.com",
-				Rules:                   mutatingRules,
-				ClientConfig: mutateV1.WebhookClientConfig{
-					Service: &mutateV1.ServiceReference{
-						Namespace: ws.Options.ServiceNamespace,
-						Name:      ws.Options.ServiceName,
-						Port:      &portInt32,
-						Path:      &MutatingWebhookConfigurationPath,
-					},
-					CABundle: caCert,
-				},
-			}
-
-			webhookConfig := &mutateV1.MutatingWebhookConfiguration{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: MutatingWebhookConfigurationName,
-				},
-				Webhooks: []mutateV1.MutatingWebhook{mutatingWebHook},
-			}
-
-			if _, err := mutatingConfigs.Create(context.Background(), webhookConfig, metav1.CreateOptions{}); err != nil {
-				log.Errorf("Failed to create MutatingWebhookConfiguration %s,because of %v", MutatingWebhookConfigurationName, err)
-				return err
-			}
-		}
-		log.Errorf("Failed to get MutatingWebhookConfiguration %s,because of %v", MutatingWebhookConfigurationName, err)
-		return err
+			},
+		},
 	}
-	if conf != nil {
-		log.Infof("MutatingWebhookConfiguration %s has been created", MutatingWebhookConfigurationName)
+
+	if err := checkMutatingConfiguration(clientSet, webhook); err != nil {
+		return fmt.Errorf("failed to check mutating webhook,because of %s", err.Error())
+	}
+	log.Infof("MutatingWebhookConfiguration %s has been created", MutatingWebhookConfigurationName)
+	return nil
+}
+
+func checkMutatingConfiguration(kubeClient kubernetes.Interface, m []mutateV1.MutatingWebhook) error {
+	mwc, err := kubeClient.AdmissionregistrationV1().MutatingWebhookConfigurations().Get(context.TODO(), MutatingWebhookConfigurationName, metav1.GetOptions{})
+	if err != nil {
+		if errors.IsNotFound(err) {
+			// create new webhook
+			return createMutatingWebhook(kubeClient, m)
+		} else {
+			return err
+		}
+	}
+	return updateMutatingWebhook(mwc, kubeClient, m)
+}
+
+func createMutatingWebhook(kubeClient kubernetes.Interface, webhook []mutateV1.MutatingWebhook) error {
+	webhookConfig := &mutateV1.MutatingWebhookConfiguration{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: MutatingWebhookConfigurationName,
+		},
+		Webhooks: webhook,
+	}
+
+	if _, err := kubeClient.AdmissionregistrationV1().MutatingWebhookConfigurations().Create(context.TODO(), webhookConfig, metav1.CreateOptions{}); err != nil {
+		return fmt.Errorf("failed to create %s: %v", MutatingWebhookConfigurationName, err)
+	}
+	return nil
+}
+
+func updateMutatingWebhook(mwc *mutateV1.MutatingWebhookConfiguration, kubeClient kubernetes.Interface, webhook []mutateV1.MutatingWebhook) error {
+	mwc.Webhooks = webhook
+	if _, err := kubeClient.AdmissionregistrationV1().MutatingWebhookConfigurations().Update(context.TODO(), mwc, metav1.UpdateOptions{}); err != nil {
+		return fmt.Errorf("failed to update %s: %v", MutatingWebhookConfigurationName, err)
 	}
 	return nil
 }

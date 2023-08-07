@@ -5,16 +5,12 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/CloudNativeGame/fake-time-injector/pkg/webhook/util/generator"
+	"github.com/CloudNativeGame/fake-time-injector/pkg/webhook/util/writer"
 	log "k8s.io/klog"
-	"os"
 )
 
 type WebHookOptions struct {
-	// TLS key and value
-	TLSCertPath   string
-	TLSKeyPath    string
-	TLSCaCertPath string
-
 	TLSPair tls.Certificate
 	// Server Port
 	Port string
@@ -26,7 +22,10 @@ type WebHookOptions struct {
 	// kubeconf path
 	KubeConf string
 	// plugin and configuration
-	Plugins Plugins
+	Plugins        Plugins
+	WebhookCertDir string
+	CaCert         *generator.Artifacts
+	DnsName        string
 }
 
 // NewWebHookOptions parse the command line params and initialize the server
@@ -35,7 +34,14 @@ func NewWebHookOptions() (options *WebHookOptions, err error) {
 	// initialize the flag parse
 	wo.init()
 
-	// todo add strict validation [Empty/Pattern]
+	//
+	err = wo.generateCert()
+	if err != nil {
+		log.Errorf("Failed to pass generate CaCert,because of %v", err)
+		return nil, err
+	}
+
+	//todo add strict validation [Empty/Pattern]
 	if passed, msg := wo.valid(); !passed {
 		log.Errorf("Failed to pass webHook options validation,because of %v", msg)
 		return nil, errors.New(msg)
@@ -47,11 +53,8 @@ func NewWebHookOptions() (options *WebHookOptions, err error) {
 // init flag params and parse
 func (wo *WebHookOptions) init() {
 	flag.Var(&wo.Plugins, "plugins", "The configuration of plugins.")
-	// tls configurations
-	flag.StringVar(&wo.TLSCaCertPath, "ca", "/run/secrets/tls/ca-cert.pem", "The path of ca cert.")
-	flag.StringVar(&wo.TLSCertPath, "cert", "/run/secrets/tls/server-cert.pem", "The path of TLS cert.")
-	flag.StringVar(&wo.TLSKeyPath, "key", "/run/secrets/tls/server-key.pem", "The path of TLS key.")
 
+	flag.StringVar(&wo.WebhookCertDir, "webhook-server-certs-dir", "/run/secrets/tls/", "Path to the X.509-formatted webhook certificate.")
 	flag.StringVar(&wo.ServiceName, "service-name", "kubernetes-faketime-injector", "The service of kubernetes-webhook-injector.")
 	flag.StringVar(&wo.ServiceNamespace, "service-namespace", "kube-system", "The namespace of kubernetes-webhook-injector.")
 	flag.StringVar(&wo.Port, "port", "443", "The webhook service port of kubernetes-webhook-injector.")
@@ -64,16 +67,32 @@ func (wo *WebHookOptions) init() {
 	flag.Parse()
 }
 
+func (wo *WebHookOptions) generateCert() error {
+	wo.DnsName = generator.ServiceToCommonName(wo.ServiceNamespace, wo.ServiceName)
+	var certWriter writer.CertWriter
+	var err error
+
+	certWriter, err = writer.NewFSCertWriter(writer.FSCertWriterOptions{Path: wo.WebhookCertDir})
+	if err != nil {
+		return fmt.Errorf("failed to constructs FSCertWriter: %v", err)
+	}
+
+	certs, _, err := certWriter.EnsureCert(wo.DnsName)
+	if err != nil {
+		return fmt.Errorf("failed to ensure certs: %v", err)
+	}
+
+	if err := writer.WriteCertsToDir(wo.WebhookCertDir, certs); err != nil {
+		return fmt.Errorf("failed to write certs to dir: %v", err)
+	}
+	wo.CaCert = certs
+	return nil
+}
+
 // check params is valid or not
 func (wo *WebHookOptions) valid() (passed bool, msg string) {
 
-	// check file exist or not
-	if _, err := os.Stat(wo.TLSCertPath); err != nil && os.IsNotExist(err) {
-		return false, fmt.Sprintf("TLSCert is not found.")
-	}
-
-	// load key pair from file
-	pair, err := tls.LoadX509KeyPair(wo.TLSCertPath, wo.TLSKeyPath)
+	pair, err := tls.X509KeyPair(wo.CaCert.Cert, wo.CaCert.Key)
 	if err != nil {
 		return false, fmt.Sprintf("Failed to parse certificate,because of %v", err)
 	}

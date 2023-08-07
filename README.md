@@ -26,123 +26,7 @@ fake-time-injector是阿里云与莉莉丝游戏通过CloudNativeGame社区一�
 
 以下是使用 fake-time-injector 修改容器进程时间的示例。该工具使用 Kubernetes 中的 Webhook 机制实现请求解析更改。一旦在容器中部署了此组件，您就可以按照某些规则编写 YAML 文件来修改 pod 中特定容器的时间。基本原理是通过配置 WATCHMAKER 插件和 LIBFAKETIME 插件使此组件能够修改容器时间。
 
-### 步骤 1：生成CA证书
-
-要在群集中配置 webhook admission，请使用以下 YAML 生成包含 CA 证书的 secret。注意，无需配置 webhookconfig.yaml 文件，因为 Fake-Time-Injector 将自动配置 MutatingWebhookConfiguration。
-
-* 首先，您需要安装 cfssl 以创建证书：
-
-```shell
-linux:
-wget -q https://pkg.cfssl.org/R1.2/cfssl_linux-amd64 https://pkg.cfssl.org/R1.2/cfssljson_linux-amd64
-chmod +x cfssl_linux-amd64 cfssljson_linux-amd64 
-sudo mv cfssl_linux-amd64 /usr/local/bin/cfssl
-sudo mv cfssljson_linux-amd64 /usr/local/bin/cfssljson
-
-mac:
-brew install cfssl
-```
-
-* 使用以下 JSON 文件创建 CA 证书：
-
-```shell
-cat > ca-config.json <<EOF
-{
-    "signing": {
-        "default": {
-            "expiry": "26280h"
-        },         //证书的有效期
-        "profiles": {
-            "server": {
-                "usages": [
-                    "signing",
-                    "key encipherment",
-                    "server auth",
-                    "client auth"
-                ],              //证书使用的场景
-                "expiry": "26280h"
-            }
-        }
-    }
-}
-EOF
-
-cat > ca-csr.json <<EOF 
-{
-    "CN": "Kubernetes",
-    "key": {
-        "algo": "rsa",
-        "size": 2048
-    },
-    "names": [
-        {
-            "C": "US",
-            "L": "Portland",
-            "O": "Kubernetes",
-            "OU": "CA",
-            "ST": "Oregon"
-        }
-    ]
-} 
-EOF
-
-cfssl gencert -initca ca-csr.json | cfssljson -bare ca 
-```
-
-* 创建服务器证书
-
-```shell
-cat > server-csr.json <<EOF 
-{
-    "CN": "admission",
-    "key": {
-        "algo": "rsa",
-        "size": 2048
-    },        //  生成证书所需的算法和密钥长度
-    "names": [
-        {
-            "C": "US",
-            "L": "Portland",
-            "O": "Kubernetes",
-            "OU": "Kubernetes",
-            "ST": "Oregon"
-        }
-    ]
-} 
-EOF
-
-cfssl gencert -ca=ca.pem -ca-key=ca-key.pem -config=ca-config.json -hostname=kubernetes-faketime-injector.kube-system.svc -profile=server server-csr.json | cfssljson -bare server
-```
-
--hostname：命名方式为`{serviceName}.{serviceNamespace}.svc`，本示例中webhook的serviceName是kubernetes-faketime-injector，namespace是kube-system。
-
-* 对生成的证书进行 Base64 加密：
-
-```shell
-cat ca.pem | base64
-cat server.pem | base64
-cat server-key.pem | base64
-```
-
-* 使用前面步骤中的密钥生成 secret：
-
-```shell
-cat > secret.yaml <<EOF
-apiVersion: v1
-data:
-  ca-cert.pem: xxxxxxxxx
-  server-cert.pem: xxxxxx
-  server-key.pem: xxxxxxx
-kind: Secret
-metadata:
-  name: kubernetes-faketime-injector
-  namespace: kube-system
-EOF
-
-  kubectl apply -f secret.yaml
-```
-
-### 步骤 2: 部署fake-time-injector
+### 步骤1: 部署fake-time-injector
 
 使用以下YAML文件，部署fake-time-injector：
 
@@ -199,7 +83,7 @@ spec:
         app: kubernetes-faketime-injector
     spec:
       containers:
-        - image: registry.cn-hangzhou.aliyuncs.com/acs/fake-time-injector:v2     #  使用 fake-time-injector/Dockerfile 创建镜像
+        - image: registry.cn-hangzhou.aliyuncs.com/acs/fake-time-injector:v2.1     #  使用 fake-time-injector/Dockerfile 创建镜像
           imagePullPolicy: Always
           name: kubernetes-faketime-injector
           resources:
@@ -210,18 +94,13 @@ spec:
               cpu: 100m
               memory: 100Mi
           env:
+            - name: CLUSTER_MODE     # CLUSTER_MODE为true时，命名空间内的所有pod在一定时间范围内(40s)启动时获得一致的偏移量
+              value: "true"
             - name: LIBFAKETIME_PLUGIN_IMAGE
               value: "registry.cn-hangzhou.aliyuncs.com/acs/libfaketime:v1"
             - name: FAKETIME_PLUGIN_IMAGE
-              value: "registry.cn-hangzhou.aliyuncs.com/acs/fake-time-sidecar:v1"   # 使用 fake-time-injector/plugins/faketime/build/Dockerfile 创建镜像
-          volumeMounts:
-            - name: webhook-certs
-              mountPath: /run/secrets/tls
+              value: "registry.cn-hangzhou.aliyuncs.com/acs/fake-time-sidecar:v2"   # 使用 fake-time-injector/plugins/faketime/build/Dockerfile 创建镜像
       serviceAccountName:  fake-time-injector-sa
-      volumes:
-        - name: webhook-certs
-          secret:
-            secretName: kubernetes-faketime-injector
 ---
 kind: Service
 apiVersion: v1
@@ -243,13 +122,39 @@ spec:
 kubectl apply -f deploy.yaml 
 ```
 
-### step3: 修改时间
+### step2: 修改时间
 
-要使用fake-time-injector，你需要向pod添加两个注解：
+我们提供两种修改进程时间的方法，watchmaker指令和libfaketime链接库。
+
+libfaketime链接库配置方法，添加annotation：
+支持语言：python、c、ruby、php、c++、js、java、erlang
+* cloudnativegame.io/fake-time: 设置虚假的时间
+
+yaml配置示例:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test
+  namespace: kube-system
+  labels:
+    app: myapp
+    version: v1
+  annotations:
+    cloudnativegame.io/fake-time: "2024-01-01 00:00:00"  # 此处还可以配置'-3h'， '6h'， '6d'， '-'表示过去的时间。
+spec:
+  containers:
+    - name: test
+      image: registry.cn-hangzhou.aliyuncs.com/acs/testc:v1
+```
+
+watchmaker配置方法,增加如下annotation。
+支持语言：go、python、ruby、php、c++
 * cloudnativegame.io/process-name: 设置需要修改时间的进程
 * cloudnativegame.io/fake-time: 设置虚假的时间
 
-下面是一个YAML文件的例子，说明了如何给pod添加annotation：
+yaml配置示例:
 
 ```yaml
 apiVersion: v1
@@ -262,12 +167,13 @@ metadata:
     version: v1
   annotations:
     cloudnativegame.io/process-name: "hello"     # 如果需要同时修改多个进程用`,`隔开进程名即可
-    cloudnativegame.io/fake-time: "2024-01-01 00:00:00"
+    cloudnativegame.io/fake-time: "2024-01-01 00:00:00"     # 此处还可以配置调整的秒数，'86400'表示时间向后漂移一天，watchmaker不支持过去的时间。
 spec:
   containers:
     - name: myhello
       image: registry.cn-hangzhou.aliyuncs.com/acs/hello:v1
 ```
+
 将这个YAML文件保存到一个名为testpod.yaml的本地文件。然后，使用下面的命令来部署它：
 
 ```yaml
