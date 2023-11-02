@@ -52,28 +52,25 @@ func (s *FaketimePlugin) MatchAnnotations(podAnnots map[string]string) bool {
 }
 
 func (s *FaketimePlugin) Patch(pod *apiv1.Pod, operation addmissionV1.Operation) []utils.PatchOperation {
-	var delayTIme string
+	fakeTime, err := calculateFakeTime(pod.Annotations[FakeTime])
+	if err != nil {
+		klog.Errorf("failed parse time, err:", err)
+		return []utils.PatchOperation{}
+	}
+
 	val, ok := os.LookupEnv(CLUSTER_MODE_ENV)
 	if ok && val == "true" {
 		if entry, exists := delaySecondGroup[pod.Namespace]; exists {
 			// 如果键已存在，则直接使用同一个namespace虚假时间
 			fmt.Printf("Key %q already exists, using value: %s\n", pod.Namespace, entry.Value)
-			delayTIme = entry.Value
+			fakeTime = entry.Value
 		} else {
-			delayTIme = pod.Annotations[FakeTime]
-
 			keyEntry := namespaceDelayEntry{
-				Value:   delayTIme,
+				Value:   fakeTime,
 				Timeout: time.AfterFunc(NamespaceDelayTimeout, func() { removeNamespaceDelayKey(pod.Namespace) }),
 			}
-
 			delaySecondGroup[pod.Namespace] = keyEntry
 		}
-	}
-
-	if !ok || val == "false" {
-		delayTIme = pod.Annotations[FakeTime]
-
 	}
 
 	var opPatches []utils.PatchOperation
@@ -88,17 +85,16 @@ func (s *FaketimePlugin) Patch(pod *apiv1.Pod, operation addmissionV1.Operation)
 		// annotations设置‘cloudnativegame.io/process-name’则创建watchmaker修改进程时间，反之则使用libfaketime链接库修改时间
 		_, ok = pod.Annotations[ModifyProcessName]
 		if ok {
-			opPatches = watchMakerPatches(pod, delayTIme, opPatches)
+			opPatches = watchMakerPatches(pod, fakeTime, opPatches)
 		} else {
-
-			opPatches = libFakeTimePatches(pod, delayTIme, opPatches)
+			opPatches = libFakeTimePatches(pod, fakeTime, opPatches)
 		}
 
 	}
 	return opPatches
 }
 
-func libFakeTimePatches(pod *apiv1.Pod, delayTIme string, opPatches []utils.PatchOperation) []utils.PatchOperation {
+func libFakeTimePatches(pod *apiv1.Pod, fakeTime string, opPatches []utils.PatchOperation) []utils.PatchOperation {
 	// add volume
 	var patchVolume bool
 	volumePath := "/spec/volumes"
@@ -197,18 +193,14 @@ func libFakeTimePatches(pod *apiv1.Pod, delayTIme string, opPatches []utils.Patc
 	}
 
 	//add container env
-	var fakeTime string
+
 	var patchContainerEnv bool
 	var valueContainerEnv interface{}
 	var ContainerEnvPath string
-	if strings.Contains(delayTIme, ":") {
-		fakeTime = fmt.Sprintf("@%s", delayTIme)
-	} else {
-		fakeTime = delayTIme
-	}
+
 	Env := []apiv1.EnvVar{
 		{Name: "LD_PRELOAD", Value: LibFakeTimePath},
-		{Name: "FAKETIME", Value: fakeTime},
+		{Name: "FAKETIME", Value: fmt.Sprintf("@%s", fakeTime)},
 	}
 	for num, c := range pod.Spec.Containers {
 		if len(c.Env) == 0 {
@@ -234,19 +226,15 @@ func libFakeTimePatches(pod *apiv1.Pod, delayTIme string, opPatches []utils.Patc
 	return opPatches
 }
 
-func watchMakerPatches(pod *apiv1.Pod, delayTIme string, opPatches []utils.PatchOperation) []utils.PatchOperation {
-	var ContainerImageName, fakeTime string
+func watchMakerPatches(pod *apiv1.Pod, fakeTime string, opPatches []utils.PatchOperation) []utils.PatchOperation {
+	var ContainerImageName, delayTime string
 
-	if strings.Contains(delayTIme, ":") {
-		t := calculateDelayTime(delayTIme)
-		if t < 0 {
-			klog.Info("Setting future times is currently only supported in watchmaker")
-			return []utils.PatchOperation{}
-		}
-		fakeTime = strconv.Itoa(t)
-	} else {
-		fakeTime = delayTIme
+	t := calculateDelayTime(fakeTime)
+	if t < 0 {
+		klog.Error("Setting future times is currently only supported in watchmaker")
+		return []utils.PatchOperation{}
 	}
+	delayTime = strconv.Itoa(t)
 
 	if image, ok := os.LookupEnv(IMAGE_ENV); ok {
 		ContainerImageName = image
@@ -258,7 +246,7 @@ func watchMakerPatches(pod *apiv1.Pod, delayTIme string, opPatches []utils.Patch
 	}
 	con.Env = []apiv1.EnvVar{
 		{Name: "modify_process_name", Value: pod.Annotations[ModifyProcessName]},
-		{Name: "delay_second", Value: fakeTime},
+		{Name: "delay_second", Value: delayTime},
 	}
 	addSidecarPatch := utils.PatchOperation{
 		Op:    "add",
@@ -274,7 +262,6 @@ func watchMakerPatches(pod *apiv1.Pod, delayTIme string, opPatches []utils.Patch
 	}
 	opPatches = append(opPatches, openShareProcessNamespace)
 	return opPatches
-
 }
 
 func hasInitContainer(pod *apiv1.Pod, initContainerName string) bool {
@@ -305,14 +292,30 @@ func hasVolumeMount(container apiv1.Container, volumeMountName string) bool {
 }
 
 func calculateDelayTime(t string) int {
-	t1, err := time.Parse("2006-01-02 15:04:05", t)
-	if err != nil {
-		klog.Error("failed parse time in watchmaker")
-	}
-	t2 := time.Now().UTC()
-	duration := t1.Sub(t2)
+	t_, _ := time.Parse("2006-01-02 15:04:05 -0700 MST", t)
+
+	now := time.Now().UTC()
+	duration := t_.Sub(now)
 	seconds := int(duration.Seconds())
 	return seconds
+}
+
+func calculateFakeTime(t string) (string, error) {
+	if strings.Contains(t, ":") {
+		t_, err := time.Parse("2006-01-02 15:04:05", t)
+		if err != nil {
+			return "", err
+		}
+		s := t_.UTC().String()
+		return s, nil
+	}
+	// 解析时间间隔字符串为Duration类型
+	duration, err := time.ParseDuration(t)
+	if err != nil {
+		return "", err
+	}
+	s := time.Now().UTC().Add(duration).String()
+	return s, nil
 }
 
 func NewSgPlugin() *FaketimePlugin {

@@ -84,7 +84,7 @@ spec:
         app: kubernetes-faketime-injector
     spec:
       containers:
-        - image: registry.cn-hangzhou.aliyuncs.com/acs/fake-time-injector:v2.1     # docker build -t fake-time-injector:v1 . -f fake-time-injector/Dockerfile
+        - image: registry.cn-hangzhou.aliyuncs.com/acs/fake-time-injector:v3     # docker build -t fake-time-injector:v1 . -f fake-time-injector/Dockerfile
           imagePullPolicy: Always
           name: kubernetes-faketime-injector
           resources:
@@ -143,7 +143,7 @@ metadata:
     app: myapp
     version: v1
   annotations:
-    cloudnativegame.io/fake-time: "2024-01-01 00:00:00"  # Here you can also configure '-3h', '6h', '6d', '-' to indicate past time.
+    cloudnativegame.io/fake-time: "2024-01-01 00:00:00"  # Here you can also configure '3h40s' and '-7h20m40s', '-' to indicate past time.
 spec:
   containers:
     - name: test
