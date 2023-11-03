@@ -83,7 +83,7 @@ spec:
         app: kubernetes-faketime-injector
     spec:
       containers:
-        - image: registry.cn-hangzhou.aliyuncs.com/acs/fake-time-injector:v2.1     #  使用 fake-time-injector/Dockerfile 创建镜像
+        - image: registry.cn-hangzhou.aliyuncs.com/acs/fake-time-injector:v3     #  使用 fake-time-injector/Dockerfile 创建镜像
           imagePullPolicy: Always
           name: kubernetes-faketime-injector
           resources:
@@ -142,7 +142,7 @@ metadata:
     app: myapp
     version: v1
   annotations:
-    cloudnativegame.io/fake-time: "2024-01-01 00:00:00"  # 此处还可以配置'-3h'， '6h'， '6d'， '-'表示过去的时间。
+    cloudnativegame.io/fake-time: "2024-01-01 00:00:00"  # 此处还可以配置时分秒组合的时间间隔，如'3h40s'和'-7h20m40s'， '-'表示过去的时间。
 spec:
   containers:
     - name: test
