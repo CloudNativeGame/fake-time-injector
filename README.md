@@ -83,7 +83,7 @@ spec:
         app: kubernetes-faketime-injector
     spec:
       containers:
-        - image: registry.cn-hangzhou.aliyuncs.com/acs/fake-time-injector:v3     #  使用 fake-time-injector/Dockerfile 创建镜像
+        - image: registry.cn-hangzhou.aliyuncs.com/acs/fake-time-injector:v4     #  使用 fake-time-injector/Dockerfile 创建镜像
           imagePullPolicy: Always
           name: kubernetes-faketime-injector
           resources:
@@ -96,10 +96,12 @@ spec:
           env:
             - name: CLUSTER_MODE     # CLUSTER_MODE为true时，命名空间内的所有pod在一定时间范围内(40s)启动时获得一致的偏移量
               value: "true"
+            - name: Namespace_Delay_Timeout     # 命名空间内的所有pod在一定时间范围内(120s)启动时获得一致的偏移量, 默认值为40s.
+              value: "120"
             - name: LIBFAKETIME_PLUGIN_IMAGE
               value: "registry.cn-hangzhou.aliyuncs.com/acs/libfaketime:v1"
             - name: FAKETIME_PLUGIN_IMAGE
-              value: "registry.cn-hangzhou.aliyuncs.com/acs/fake-time-sidecar:v2"   # 使用 fake-time-injector/plugins/faketime/build/Dockerfile 创建镜像
+              value: "registry.cn-hangzhou.aliyuncs.com/acs/fake-time-sidecar:v3"   # 使用 fake-time-injector/plugins/faketime/build/Dockerfile 创建镜像
       serviceAccountName:  fake-time-injector-sa
 ---
 kind: Service
@@ -212,7 +214,7 @@ spec:
           value: hello               # 如果需要同时修改多个进程用`,`隔开进程名即可
         - name: delay_second
           value: '86400'
-      image: 'registry.cn-hangzhou.aliyuncs.com/acs/fake-time-sidecar:v1'
+      image: 'registry.cn-hangzhou.aliyuncs.com/acs/fake-time-sidecar:v3'
       imagePullPolicy: Always
       name: fake-time-sidecar
   shareProcessNamespace: true
