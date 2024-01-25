@@ -83,7 +83,7 @@ spec:
         app: kubernetes-faketime-injector
     spec:
       containers:
-        - image: registry.cn-hangzhou.aliyuncs.com/acs/fake-time-injector:v4     #  使用 fake-time-injector/Dockerfile 创建镜像
+        - image: registry-cn-hangzhou.ack.aliyuncs.com/acs/fake-time-injector:v4     #  使用 fake-time-injector/Dockerfile 创建镜像
           imagePullPolicy: Always
           name: kubernetes-faketime-injector
           resources:
@@ -101,7 +101,7 @@ spec:
             - name: LIBFAKETIME_PLUGIN_IMAGE
               value: "registry.cn-hangzhou.aliyuncs.com/acs/libfaketime:v1"
             - name: FAKETIME_PLUGIN_IMAGE
-              value: "registry.cn-hangzhou.aliyuncs.com/acs/fake-time-sidecar:v3"   # 使用 fake-time-injector/plugins/faketime/build/Dockerfile 创建镜像
+              value: "registry-cn-hangzhou.ack.aliyuncs.com/acs/fake-time-sidecar:v3"   # 使用 fake-time-injector/plugins/faketime/build/Dockerfile 创建镜像
       serviceAccountName:  fake-time-injector-sa
 ---
 kind: Service
@@ -169,11 +169,14 @@ metadata:
     version: v1
   annotations:
     cloudnativegame.io/process-name: "hello"     # 如果需要同时修改多个进程用`,`隔开进程名即可
-    cloudnativegame.io/fake-time: "2024-01-01 00:00:00"     # 此处还可以配置调整的秒数，'86400'表示时间向后漂移一天，watchmaker不支持过去的时间。
+    cloudnativegame.io/fake-time: "2030-01-01 00:00:00"     # 此处还可以配置调整的秒数，'86400'表示时间向后漂移一天，watchmaker不支持过去的时间。
 spec:
   containers:
     - name: myhello
       image: registry.cn-hangzhou.aliyuncs.com/acs/hello:v1
+      env:
+        - name: Modify_Sub_Process        # Modify_Sub_Process为true时,同时修改子进程的时间。
+          value: "true"
 ```
 
 将这个YAML文件保存到一个名为testpod.yaml的本地文件。然后，使用下面的命令来部署它：

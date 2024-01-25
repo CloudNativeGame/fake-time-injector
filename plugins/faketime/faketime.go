@@ -25,6 +25,7 @@ const (
 	LibFakeTimeMountPath  = "/usr/local/lib/faketime"
 	CLUSTER_MODE_ENV      = "CLUSTER_MODE"
 	NamespaceDelayTimeout = "Namespace_Delay_Timeout"
+	ModifySubProcess      = "Modify_Sub_Process"
 )
 
 var (
@@ -261,6 +262,17 @@ func watchMakerPatches(pod *apiv1.Pod, fakeTime string, opPatches []utils.PatchO
 		{Name: "modify_process_name", Value: pod.Annotations[ModifyProcessName]},
 		{Name: "delay_second", Value: delayTime},
 	}
+
+OutBreak:
+	for _, container := range pod.Spec.Containers {
+		for _, v := range container.Env {
+			if v.Name == ModifySubProcess {
+				con.Env = append(con.Env, apiv1.EnvVar{Name: ModifySubProcess, Value: v.Value})
+				break OutBreak
+			}
+		}
+	}
+
 	addSidecarPatch := utils.PatchOperation{
 		Op:    "add",
 		Path:  "/spec/containers/-",
