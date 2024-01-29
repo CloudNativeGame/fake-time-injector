@@ -24,7 +24,8 @@ const (
 	LibFakeTimePath       = "/usr/local/lib/faketime/libfaketime.so.1"
 	LibFakeTimeMountPath  = "/usr/local/lib/faketime"
 	CLUSTER_MODE_ENV      = "CLUSTER_MODE"
-	NamespaceDelayTimeout = 40 * time.Second
+	NamespaceDelayTimeout = "Namespace_Delay_Timeout"
+	ModifySubProcess      = "Modify_Sub_Process"
 )
 
 var (
@@ -62,14 +63,27 @@ func (s *FaketimePlugin) Patch(pod *apiv1.Pod, operation addmissionV1.Operation)
 	if ok && val == "true" {
 		if entry, exists := delaySecondGroup[pod.Namespace]; exists {
 			// 如果键已存在，则直接使用同一个namespace虚假时间
-			fmt.Printf("Key %q already exists, using value: %s\n", pod.Namespace, entry.Value)
+			klog.Infof("Key %q already exists, using value: %s\n", pod.Namespace, entry.Value)
 			fakeTime = entry.Value
 		} else {
+			var namespaceDelayTimeout time.Duration
+			v, _ := os.LookupEnv(NamespaceDelayTimeout)
+			if v != "" {
+				timeout, err := strconv.Atoi(v)
+				if err != nil {
+					klog.Errorf("failed parse time, err:", err)
+					return []utils.PatchOperation{}
+				}
+				namespaceDelayTimeout = time.Duration(timeout) * time.Second
+			} else {
+				namespaceDelayTimeout = 40 * time.Second
+			}
 			keyEntry := namespaceDelayEntry{
 				Value:   fakeTime,
-				Timeout: time.AfterFunc(NamespaceDelayTimeout, func() { removeNamespaceDelayKey(pod.Namespace) }),
+				Timeout: time.AfterFunc(namespaceDelayTimeout, func() { removeNamespaceDelayKey(pod.Namespace) }),
 			}
 			delaySecondGroup[pod.Namespace] = keyEntry
+			klog.Infof("set Key: %v, will be deleted after  %v seconds", pod.Namespace, namespaceDelayTimeout.Seconds())
 		}
 	}
 
@@ -248,6 +262,17 @@ func watchMakerPatches(pod *apiv1.Pod, fakeTime string, opPatches []utils.PatchO
 		{Name: "modify_process_name", Value: pod.Annotations[ModifyProcessName]},
 		{Name: "delay_second", Value: delayTime},
 	}
+
+OutBreak:
+	for _, container := range pod.Spec.Containers {
+		for _, v := range container.Env {
+			if v.Name == ModifySubProcess {
+				con.Env = append(con.Env, apiv1.EnvVar{Name: ModifySubProcess, Value: v.Value})
+				break OutBreak
+			}
+		}
+	}
+
 	addSidecarPatch := utils.PatchOperation{
 		Op:    "add",
 		Path:  "/spec/containers/-",
@@ -329,6 +354,6 @@ func removeNamespaceDelayKey(key string) {
 	if entry, exists := delaySecondGroup[key]; exists {
 		delete(delaySecondGroup, key)
 		entry.Timeout.Stop()
-		fmt.Printf("Key %q has been cleaned\n", key)
+		klog.Infof("Key %s has been cleaned\n", key)
 	}
 }
