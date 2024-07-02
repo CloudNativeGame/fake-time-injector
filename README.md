@@ -151,6 +151,28 @@ spec:
       image: registry.cn-hangzhou.aliyuncs.com/acs/testc:v1
 ```
 
+如果你正在使用[Kruise-Game](https://github.com/openkruise/kruise-game)，通过如下配置即可修改游戏服的时间。
+```yaml
+apiVersion: game.kruise.io/v1alpha1
+kind: GameServerSet
+metadata:
+  name: minecraft
+  namespace: default
+spec:
+  replicas: 3
+  updateStrategy:
+    rollingUpdate:
+      podUpdatePolicy: InPlaceIfPossible
+  gameServerTemplate:
+    metadata:
+      annotations:
+        cloudnativegame.io/fake-time: "2024-01-01 00:00:00"
+    spec:
+      containers:
+        - image: registry.cn-hangzhou.aliyuncs.com/acs/minecraft-demo:1.12.2
+          name: minecraft
+```
+
 watchmaker配置方法,增加如下annotation。
 支持语言：go、python、ruby、php、c++
 * cloudnativegame.io/process-name: 设置需要修改时间的进程
