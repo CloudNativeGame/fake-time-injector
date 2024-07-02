@@ -150,6 +150,28 @@ spec:
       image: registry.cn-hangzhou.aliyuncs.com/acs/testc:v1
 ```
 
+If you are using [Kruise-Game](https://github.com/openkruise/kruise-game), you can modify the time of the game service by configuring it as follows.
+```yaml
+apiVersion: game.kruise.io/v1alpha1
+kind: GameServerSet
+metadata:
+  name: minecraft
+  namespace: default
+spec:
+  replicas: 3
+  updateStrategy:
+    rollingUpdate:
+      podUpdatePolicy: InPlaceIfPossible
+  gameServerTemplate:
+    metadata:
+      annotations:
+        cloudnativegame.io/fake-time: "2024-01-01 00:00:00"
+    spec:
+      containers:
+        - image: registry.cn-hangzhou.aliyuncs.com/acs/minecraft-demo:1.12.2
+          name: minecraft
+```
+
 Add the following annotation to the watchmaker configuration method.
 Supported languages: go, python, ruby, php, c++
 * cloudnativegame.io/process-name: sets the process that needs to modify the time
