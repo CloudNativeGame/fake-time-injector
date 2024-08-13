@@ -83,7 +83,7 @@ spec:
         app: kubernetes-faketime-injector
     spec:
       containers:
-        - image: registry-cn-hangzhou.ack.aliyuncs.com/acs/fake-time-injector:v4     #  使用 fake-time-injector/Dockerfile 创建镜像
+        - image: registry-cn-hangzhou.ack.aliyuncs.com/acs/fake-time-injector:v5     #  使用 fake-time-injector/Dockerfile 构建镜像
           imagePullPolicy: Always
           name: kubernetes-faketime-injector
           resources:
@@ -101,7 +101,7 @@ spec:
             - name: LIBFAKETIME_PLUGIN_IMAGE
               value: "registry.cn-hangzhou.aliyuncs.com/acs/libfaketime:v1"
             - name: FAKETIME_PLUGIN_IMAGE
-              value: "registry-cn-hangzhou.ack.aliyuncs.com/acs/fake-time-sidecar:v3"   # 使用 fake-time-injector/plugins/faketime/build/Dockerfile 创建镜像
+              value: "registry-cn-hangzhou.ack.aliyuncs.com/acs/fake-time-sidecar:v4.1"   # 使用 fake-time-injector/plugins/faketime/build/Dockerfile 创建镜像
       serviceAccountName:  fake-time-injector-sa
 ---
 kind: Service
@@ -144,7 +144,7 @@ metadata:
     app: myapp
     version: v1
   annotations:
-    cloudnativegame.io/fake-time: "2024-01-01 00:00:00"  # 此处还可以配置时分秒组合的时间间隔，如'3h40s'和'-7h20m40s'， '-'表示过去的时间。
+    cloudnativegame.io/fake-time: "2024-01-01 00:00:00"  # 此处还可以配置'+3h40s'或者'-7h20m40s'，相对日期偏移可以是正数或者负数。  “m”、“h”、“d ”和 “y ”可用于指定以分钟、小时、天和年（365 天）为单位的偏移量。
 spec:
   containers:
     - name: test
@@ -239,7 +239,7 @@ spec:
           value: hello               # 如果需要同时修改多个进程用`,`隔开进程名即可
         - name: delay_second
           value: '86400'
-      image: 'registry.cn-hangzhou.aliyuncs.com/acs/fake-time-sidecar:v3'
+      image: 'registry-cn-hangzhou.ack.aliyuncs.com/acs/fake-time-sidecar:v4.1'
       imagePullPolicy: Always
       name: fake-time-sidecar
   shareProcessNamespace: true
