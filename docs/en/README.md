@@ -84,7 +84,7 @@ spec:
         app: kubernetes-faketime-injector
     spec:
       containers:
-        - image: registry.cn-hangzhou.aliyuncs.com/acs/fake-time-injector:v3     # docker build -t fake-time-injector:v1 . -f fake-time-injector/Dockerfile
+        - image: registry-cn-hangzhou.ack.aliyuncs.com/acs/fake-time-injector:v5     # docker build -t fake-time-injector:v5 . -f fake-time-injector/Dockerfile
           imagePullPolicy: Always
           name: kubernetes-faketime-injector
           resources:
@@ -97,10 +97,12 @@ spec:
           env:
             - name: CLUSTER_MODE   # When CLUSTER_MODE is true，all pods in the namespace get a consistent offset when started within a certain time range (40s).
               value: "true"
+            - name: Namespace_Delay_Timeout     # All pods in the namespace get a consistent offset when they are started within a certain time range (120s), the default value is 40s.
+              value: "120"
             - name: LIBFAKETIME_PLUGIN_IMAGE
               value: "registry.cn-hangzhou.aliyuncs.com/acs/libfaketime:v1"
             - name: FAKETIME_PLUGIN_IMAGE
-              value: "registry.cn-hangzhou.aliyuncs.com/acs/fake-time-sidecar:v2"   # docker build -t fake-time-sidecar:v1 . -f fake-time-injector/plugins/faketime/build/Dockerfile
+              value: "registry-cn-hangzhou.ack.aliyuncs.com/acs/fake-time-sidecar:v4.1"   # docker build -t fake-time-sidecar:v1 . -f fake-time-injector/plugins/faketime/build/Dockerfile
       serviceAccountName: fake-time-injector-sa
 ---
 kind: Service
@@ -143,7 +145,7 @@ metadata:
     app: myapp
     version: v1
   annotations:
-    cloudnativegame.io/fake-time: "2024-01-01 00:00:00"  # Here you can also configure '3h40s' and '-7h20m40s', '-' to indicate past time.
+    cloudnativegame.io/fake-time: "2024-01-01 00:00:00"  # Here you can also configure '+3h40s' or '-7h20m40s', relative date offsets can be positive or negative. the "m", "h", "d" and "y" can be used to specify the offset in minutes, hours, days and years (365 days each)
 spec:
   containers:
     - name: test
@@ -191,11 +193,14 @@ metadata:
     version: v1
   annotations:
     cloudnativegame.io/process-name: "hello"     # If you need to modify multiple processes at the same time, just separate the process names with `,`
-    cloudnativegame.io/fake-time: "2024-01-01 00:00:00"    # Here you can also configure the number of seconds to adjust, '86400' means that the time drifts back one day, watchmaker does not support past times.
+    cloudnativegame.io/fake-time: "2030-01-01 00:00:00"    # Here you can also configure the number of seconds to adjust, '86400' means that the time drifts back one day, watchmaker does not support past times.
 spec:
   containers:
     - name: myhello
       image: registry.cn-hangzhou.aliyuncs.com/acs/hello:v1
+      env:
+        - name: Modify_Sub_Process        # When Modify_Sub_Process is true, modify the time of the sub-process at the same time.
+          value: "true"
 ```
 Save this YAML file to a local file named testpod.yaml. Then, use the following command to deploy it:
 
@@ -235,7 +240,7 @@ spec:
           value: hello           # If you need to modify multiple processes at the same time, just separate the process names with `,`
         - name: delay_second
           value: '86400'
-      image: 'registry.cn-hangzhou.aliyuncs.com/acs/fake-time-sidecar:v1'
+      image: 'registry-cn-hangzhou.ack.aliyuncs.com/acs/fake-time-sidecar:v4.1'
       imagePullPolicy: Always
       name: fake-time-sidecar
   shareProcessNamespace: true

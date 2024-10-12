@@ -1,12 +1,14 @@
 package faketime
 
 import (
+	"errors"
 	"fmt"
 	"github.com/CloudNativeGame/fake-time-injector/plugins/utils"
 	addmissionV1 "k8s.io/api/admission/v1"
 	apiv1 "k8s.io/api/core/v1"
 	"k8s.io/klog"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -34,8 +36,9 @@ var (
 )
 
 type namespaceDelayEntry struct {
-	Value   string
-	Timeout *time.Timer
+	startTime time.Time
+	Value     string
+	Timeout   *time.Timer
 }
 
 type FaketimePlugin struct {
@@ -53,34 +56,44 @@ func (s *FaketimePlugin) MatchAnnotations(podAnnots map[string]string) bool {
 }
 
 func (s *FaketimePlugin) Patch(pod *apiv1.Pod, operation addmissionV1.Operation) []utils.PatchOperation {
-	fakeTime, err := calculateFakeTime(pod.Annotations[FakeTime])
-	if err != nil {
-		klog.Errorf("failed parse time, err:", err)
-		return []utils.PatchOperation{}
-	}
-
+	fakeTime := pod.Annotations[FakeTime]
 	val, ok := os.LookupEnv(CLUSTER_MODE_ENV)
 	if ok && val == "true" {
 		if entry, exists := delaySecondGroup[pod.Namespace]; exists {
-			// 如果键已存在，则直接使用同一个namespace虚假时间
-			klog.Infof("Key %q already exists, using value: %s\n", pod.Namespace, entry.Value)
+			// If the key already exists, the same namespace fake time is used directly
+			klog.Infof("Key %q already exists, start time is %v,using value: %s\n", pod.Namespace, entry.startTime, entry.Value)
+			start := entry.startTime
+			duration := time.Since(start)
 			fakeTime = entry.Value
+			var err error
+			if strings.Contains(fakeTime, ":") {
+				fakeTime, err = timeStrAddDuration(fakeTime, duration)
+
+			} else {
+				fakeTime, err = parseOffsetTime(fakeTime)
+			}
+			if err != nil {
+				klog.Errorf("failed to calculate fake time, err: %v", err)
+				return []utils.PatchOperation{}
+			}
 		} else {
 			var namespaceDelayTimeout time.Duration
 			v, _ := os.LookupEnv(NamespaceDelayTimeout)
 			if v != "" {
 				timeout, err := strconv.Atoi(v)
 				if err != nil {
-					klog.Errorf("failed parse time, err:", err)
+					klog.Errorf("failed parse time, err: %v", err)
 					return []utils.PatchOperation{}
 				}
 				namespaceDelayTimeout = time.Duration(timeout) * time.Second
 			} else {
 				namespaceDelayTimeout = 40 * time.Second
 			}
+			now := time.Now().UTC()
 			keyEntry := namespaceDelayEntry{
-				Value:   fakeTime,
-				Timeout: time.AfterFunc(namespaceDelayTimeout, func() { removeNamespaceDelayKey(pod.Namespace) }),
+				startTime: now,
+				Value:     fakeTime,
+				Timeout:   time.AfterFunc(namespaceDelayTimeout, func() { removeNamespaceDelayKey(pod.Namespace) }),
 			}
 			delaySecondGroup[pod.Namespace] = keyEntry
 			klog.Infof("set Key: %v, will be deleted after  %v seconds", pod.Namespace, namespaceDelayTimeout.Seconds())
@@ -96,19 +109,23 @@ func (s *FaketimePlugin) Patch(pod *apiv1.Pod, operation addmissionV1.Operation)
 			}
 		}
 
-		// annotations设置‘cloudnativegame.io/process-name’则创建watchmaker修改进程时间，反之则使用libfaketime链接库修改时间
+		// annotations set to ‘cloudnativegame.io/process-name’ creates a watchmaker that modifies the process time, if not it uses the libfaketime library to modify the time
 		_, ok = pod.Annotations[ModifyProcessName]
 		if ok {
 			opPatches = watchMakerPatches(pod, fakeTime, opPatches)
 		} else {
 			opPatches = libFakeTimePatches(pod, fakeTime, opPatches)
 		}
-
 	}
 	return opPatches
 }
 
 func libFakeTimePatches(pod *apiv1.Pod, fakeTime string, opPatches []utils.PatchOperation) []utils.PatchOperation {
+	err := validateLibFakeTime(fakeTime)
+	if err != nil {
+		klog.Errorf("invalid faketime in libfaketime mode: %v", err)
+		return opPatches
+	}
 	// add volume
 	var patchVolume bool
 	volumePath := "/spec/volumes"
@@ -207,14 +224,20 @@ func libFakeTimePatches(pod *apiv1.Pod, fakeTime string, opPatches []utils.Patch
 	}
 
 	//add container env
-
 	var patchContainerEnv bool
 	var valueContainerEnv interface{}
 	var ContainerEnvPath string
+	var fakeTimeEnv string
+
+	if strings.Contains(fakeTime, ":") {
+		fakeTimeEnv = fmt.Sprintf("@%s", fakeTime)
+	} else {
+		fakeTimeEnv = fakeTime
+	}
 
 	Env := []apiv1.EnvVar{
 		{Name: "LD_PRELOAD", Value: LibFakeTimePath},
-		{Name: "FAKETIME", Value: fmt.Sprintf("@%s", fakeTime)},
+		{Name: "FAKETIME", Value: fakeTimeEnv},
 	}
 	for num, c := range pod.Spec.Containers {
 		if len(c.Env) == 0 {
@@ -236,19 +259,33 @@ func libFakeTimePatches(pod *apiv1.Pod, fakeTime string, opPatches []utils.Patch
 			opPatches = append(opPatches, addContainerEnvPatch)
 		}
 	}
-
 	return opPatches
 }
 
-func watchMakerPatches(pod *apiv1.Pod, fakeTime string, opPatches []utils.PatchOperation) []utils.PatchOperation {
-	var ContainerImageName, delayTime string
+func validateLibFakeTime(fakeTime string) error {
+	if strings.Contains(fakeTime, ":") {
+		_, err := time.Parse("2006-01-02 15:04:05.999999999", fakeTime)
+		if err != nil {
+			return errors.New(fmt.Sprintf("failed parse fake time, err: %v", err))
+		}
+	} else if !(strings.HasPrefix(fakeTime, "+") || strings.HasPrefix(fakeTime, "-")) {
+		return errors.New("please enter the correct time offset with '+' or '-'")
+	}
+	return nil
+}
 
-	t := calculateDelayTime(fakeTime)
-	if t < 0 {
-		klog.Error("Setting future times is currently only supported in watchmaker")
+func watchMakerPatches(pod *apiv1.Pod, fakeTime string, opPatches []utils.PatchOperation) []utils.PatchOperation {
+	var ContainerImageName string
+
+	offset, sec, nsec, err := calculateDelayTime(fakeTime)
+	if err != nil {
+		klog.Error("failed to calculate delay time in watchmaker mode, err:", err)
 		return []utils.PatchOperation{}
 	}
-	delayTime = strconv.Itoa(t)
+	if offset == "-" {
+		klog.Error("Setting future times is currently only supported in watchmaker mode")
+		return []utils.PatchOperation{}
+	}
 
 	if image, ok := os.LookupEnv(IMAGE_ENV); ok {
 		ContainerImageName = image
@@ -260,7 +297,8 @@ func watchMakerPatches(pod *apiv1.Pod, fakeTime string, opPatches []utils.PatchO
 	}
 	con.Env = []apiv1.EnvVar{
 		{Name: "modify_process_name", Value: pod.Annotations[ModifyProcessName]},
-		{Name: "delay_second", Value: delayTime},
+		{Name: "delay_second", Value: strconv.Itoa(sec)},
+		{Name: "delay_nanosecond", Value: strconv.Itoa(nsec)},
 	}
 
 OutBreak:
@@ -316,35 +354,122 @@ func hasVolumeMount(container apiv1.Container, volumeMountName string) bool {
 	return false
 }
 
-func calculateDelayTime(t string) int {
-	t_, _ := time.Parse("2006-01-02 15:04:05 -0700 MST", t)
+// Converts time offsets to seconds and nanoseconds in watchmaker mode.
+func calculateDelayTime(timeStr string) (string, int, int, error) {
+	var seconds float64
+	if strings.Contains(timeStr, ":") {
+		t_, err := time.Parse("2006-01-02 15:04:05.999999999", timeStr)
+		if err != nil {
+			return "", 0, 0, errors.New("failed parse time")
+		}
+		now := time.Now().UTC()
+		duration := t_.Sub(now)
+		seconds = duration.Seconds()
+	} else {
+		t_, err := strconv.ParseFloat(timeStr, 64)
+		if err != nil {
+			return "", 0, 0, errors.New("failed parse offset time")
+		}
+		seconds = t_
+	}
 
-	now := time.Now().UTC()
-	duration := t_.Sub(now)
-	seconds := int(duration.Seconds())
-	return seconds
+	sec, nsec, err := calculateSecondAndNanosecond(seconds)
+	if err != nil {
+		return "", 0, 0, err
+	}
+
+	if seconds < 0 {
+		return "-", sec, nsec, nil
+	}
+	return "+", sec, nsec, nil
 }
 
-func calculateFakeTime(t string) (string, error) {
-	if strings.Contains(t, ":") {
-		t_, err := time.Parse("2006-01-02 15:04:05", t)
+func calculateSecondAndNanosecond(second float64) (sec int, nsec int, err error) {
+	secondStr := strconv.FormatFloat(second, 'f', 9, 64)
+	parts := strings.Split(secondStr, ".")
+	if len(parts) == 2 {
+		sec, _ = strconv.Atoi(parts[0])
+		nsec, err = strconv.Atoi(parts[1])
 		if err != nil {
-			return "", err
+			return sec, nsec, errors.New("failed parse faketime's second")
 		}
-		s := t_.UTC().String()
-		return s, nil
+		return sec, nsec, nil
 	}
-	// 解析时间间隔字符串为Duration类型
-	duration, err := time.ParseDuration(t)
+	sec, err = strconv.Atoi(parts[0])
 	if err != nil {
-		return "", err
+		return sec, nsec, errors.New("failed parse faketime's nanosecond")
 	}
-	s := time.Now().UTC().Add(duration).String()
-	return s, nil
+	nsec = 0
+	return sec, nsec, nil
+
 }
 
 func NewSgPlugin() *FaketimePlugin {
 	return &FaketimePlugin{}
+}
+
+// Convert month, day, hour, minute and second to second
+func parseOffsetTime(timeStr string) (newFakeTime string, err error) {
+	regex := regexp.MustCompile(`([+-]?)(\d+)([y|d|h|m｜s])`)
+	matches := regex.FindAllStringSubmatch(timeStr, -1)
+
+	var totalSeconds float64
+	for _, match := range matches {
+		sign := match[1]
+		value, err := strconv.ParseFloat(match[2], 64)
+		if err != nil {
+			return newFakeTime, err
+		}
+		unit := match[3]
+
+		var seconds float64
+		switch unit {
+		case "y":
+			seconds = value * 365 * 24 * 60 * 60 // assuming 1 year = 365 days
+		case "d":
+			seconds = value * 24 * 60 * 60
+		case "h":
+			seconds = value * 60 * 60
+		case "m":
+			seconds = value * 60
+		case "s":
+			seconds = value
+		}
+
+		if sign == "-" {
+			seconds = -seconds
+		}
+		totalSeconds += seconds
+	}
+
+	if len(matches) == 0 && strings.TrimSpace(timeStr) != "" {
+		seconds, err := strconv.ParseFloat(timeStr, 64)
+		if err == nil {
+			totalSeconds += seconds
+		} else {
+			return newFakeTime, err
+		}
+	}
+
+	fakeTime := strconv.FormatFloat(totalSeconds, 'f', -1, 64)
+	if !strings.Contains(fakeTime, "-") {
+		newFakeTime = "+" + fakeTime
+	} else {
+		newFakeTime = fakeTime
+	}
+	klog.Infof("The duration faketime in the same namespace is %fs", totalSeconds)
+	return newFakeTime, nil
+}
+
+func timeStrAddDuration(fakeTime string, offsetTime time.Duration) (newFakeTime string, err error) {
+	t, err := time.Parse("2006-01-02 15:04:05.999999999", fakeTime)
+	if err != nil {
+		return "", err
+	}
+
+	newFakeTime = t.Add(offsetTime).Format("2006-01-02 15:04:05.999999999")
+	klog.Infof("The faketime in the same namespace is %s, offset time is %fs, resulting in a new faketime of %s", fakeTime, offsetTime.Seconds(), newFakeTime)
+	return newFakeTime, nil
 }
 
 func removeNamespaceDelayKey(key string) {
