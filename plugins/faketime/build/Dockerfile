@@ -1,4 +1,5 @@
 FROM golang:1.18
+RUN apt-get update && apt-get upgrade -y && rm -rf /var/cache/apt/
 RUN mkdir -p /opt/app
 WORKDIR /opt/app/
 ADD https://github.com/chaos-mesh/chaos-mesh/archive/refs/tags/v2.6.0.tar.gz /opt/app/v2.6.0.tar.gz
