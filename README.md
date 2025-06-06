@@ -101,7 +101,7 @@ spec:
             - name: LIBFAKETIME_PLUGIN_IMAGE
               value: "registry.cn-hangzhou.aliyuncs.com/acs/libfaketime:v1"
             - name: FAKETIME_PLUGIN_IMAGE
-              value: "registry-cn-hangzhou.ack.aliyuncs.com/acs/fake-time-sidecar:v4.1"   # 使用 fake-time-injector/plugins/faketime/build/Dockerfile 创建镜像
+              value: "registry-cn-hangzhou.ack.aliyuncs.com/acs/fake-time-sidecar:v4.3"   # 使用 fake-time-injector/plugins/faketime/build/Dockerfile 创建镜像
       serviceAccountName:  fake-time-injector-sa
 ---
 kind: Service
@@ -239,7 +239,7 @@ spec:
           value: hello               # 如果需要同时修改多个进程用`,`隔开进程名即可
         - name: delay_second
           value: '86400'
-      image: 'registry-cn-hangzhou.ack.aliyuncs.com/acs/fake-time-sidecar:v4.1'
+      image: 'registry-cn-hangzhou.ack.aliyuncs.com/acs/fake-time-sidecar:v4.3'
       imagePullPolicy: Always
       name: fake-time-sidecar
   shareProcessNamespace: true

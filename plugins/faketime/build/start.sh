@@ -31,5 +31,14 @@ echo "List of processes that will be modified： ${child_pids[*]}"
 for modify_process_pid in ${child_pids[@]}
 do
   echo "start modify process pid: ${modify_process_pid}"
-  ./bin/watchmaker -pid $modify_process_pid -sec_delta $delay_second -nsec_delta $delay_nanosecond -clk_ids "CLOCK_REALTIME,CLOCK_MONOTONIC"
+  command="./bin/watchmaker -pid $modify_process_pid -clk_ids CLOCK_REALTIME,CLOCK_MONOTONIC"
+  if [ -n "$delay_second" ]; then
+  command+=" -sec_delta $delay_second"
+  fi
+
+  if [ -n "$delay_nanosecond" ]; then
+  command+=" -nsec_delta $delay_nanosecond"
+  fi
+
+  eval $command
 done
